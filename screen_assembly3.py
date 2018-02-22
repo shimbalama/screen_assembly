@@ -14,6 +14,8 @@ import sys
 from ete3 import Tree, ClusterTree
 import random
 import shutil
+sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
+import lab_modules
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -534,7 +536,6 @@ def gene_tree(args, directory = 'muscle_and_raxml'):
 
 	'''
 	Makes a Raxml tree of alignments
-	'''
 	model = 'PROTGAMMAWAG'
 	query_seqs = get_query_seqs(args)
 	for query in query_seqs:
@@ -545,6 +546,10 @@ def gene_tree(args, directory = 'muscle_and_raxml'):
 			'-p', '12345',
 			'-T', args.threads]
 		call(cmd)
+	'''
+	query_seqs = get_query_seqs(args)
+	for query in query_seqs:
+		lab_modules.tree(args, query, '_nuc_seqs.aln')
 
 def sum_snps(args):
 
