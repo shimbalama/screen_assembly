@@ -58,8 +58,6 @@ def main ():
 	if not args.fast_mode:
 		align(args, blast_type)
 		gene_tree(args, blast_type)
-		#if blast_type == 'blastn':
-			#sum_snps(args) #- neeed to make an emble file to get syn..?
 		variant_types(args, assemblies)
 		plot_vars(args)
 		var_pos_csv(args)
@@ -914,9 +912,11 @@ def DNDS(args):
     d = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
     for gene in query_seqs:
         dnds_in = gene + '_nuc_seqs.aln'
-        try:
+        try:#does all V all incase ref is an outlier
             for ref in SeqIO.parse(dnds_in,'fasta'):
                 for record in SeqIO.parse(dnds_in,'fasta'):
+                    if ref.id == record.id:
+                        continue
                     seq1 = SeqRecord(Seq(str(ref.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
                     seq2 = SeqRecord(Seq(str(record.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
 
@@ -953,11 +953,13 @@ def DNDS(args):
             print ('DNDS failed for', gene)
             print (dnds_in ,os.path.exits(dnds_in))
     print (d)
-    with open('dNdS_all.csv','r') as fout:
+    with open('dNdS_all.csv','w') as fout:
         for gene in d:
             df = pd.DataFrame.from_dict(d.get(gene), orient='index')
             df.to_csv(gene + 'dNdS_raw.csv')
-            fout.write(gene+','+str(df.median())+'\n')
+            print ('ggggg',df)
+            print (np.median(df.median()))
+            fout.write(gene+','+str(np.median(df.median()))+'\n')
 
 def reg (name, reject_set, reject_dik, query, reason):
 
