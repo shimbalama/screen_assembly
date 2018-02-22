@@ -14,7 +14,7 @@ import sys
 from ete3 import Tree, ClusterTree
 import random
 import shutil
-sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
+sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules')#Set this specific to you
 import lab_modules
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
@@ -911,14 +911,12 @@ def DNDS(args):
     
     query_seqs = get_query_seqs(args)
     query_seqs = list(query_seqs)
-    d = collections.defaultdict(list)
+    d = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
     for gene in query_seqs:
         dnds_in = gene + '_nuc_seqs.aln'
         try:
-            for i, record in enumerate(SeqIO.parse(dnds_in,'fasta')):
-                if i == 0:
-                    ref = record
-                else:
+            for ref in SeqIO.parse(dnds_in,'fasta'):
+                for record in SeqIO.parse(dnds_in,'fasta'):
                     seq1 = SeqRecord(Seq(str(ref.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
                     seq2 = SeqRecord(Seq(str(record.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
 
@@ -949,22 +947,17 @@ def DNDS(args):
                     print ('dN, dS',dN, dS)
                     try: dNdS = dN/dS
                     except: dNdS = 0.0    
-                    d[gene].append(dNdS)
+                    d[gene][ref.id][record.id] = dNdS
 
         except:
             print ('DNDS failed for', gene)
             print (dnds_in ,os.path.exits(dnds_in))
     print (d)
-    with open('DNDS.csv','w') as fout:
-        fout.write('sample,median,'+','.join(query_seqs) +'\n')
-        for sample in d:
-            fout.write(sample+','+str(np.median(d.get(sample)))+',')
-            for i, query in enumerate(query_seqs):
-                if i == 0:
-                    fout.write('used as ref,')
-                else:
-                    fout.write(str(d.get(sample)[i-1])+',')
-            fout.write('\n')
+    with open('dNdS_all.csv','r') as fout:
+        for gene in d:
+            df = pd.DataFrame.from_dict(d.get(gene), orient='index')
+            df.to_csv(gene + 'dNdS_raw.csv')
+            fout.write(gene+','+str(df.median())+'\n')
 
 def reg (name, reject_set, reject_dik, query, reason):
 
