@@ -16,6 +16,14 @@ import random
 import shutil
 sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
 import lab_modules
+from Bio.Alphabet import IUPAC
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+from Bio.Align import MultipleSeqAlignment
+from Bio.Align.Applications import MuscleCommandline
+from Bio.Alphabet import generic_dna
+from Bio.codonalign.codonseq import cal_dn_ds
+from Bio import codonalign
 
 def main ():
 
@@ -44,7 +52,7 @@ def main ():
 	print ('args',args)	
 	#run
 	assemblies = cat(args)
-	
+	print (assemblies)	
 	blast_type = blast(args)
 	fasta(args)
 	if not args.fast_mode:
@@ -55,6 +63,7 @@ def main ():
 		variant_types(args, assemblies)
 		plot_vars(args)
 		var_pos_csv(args)
+		DNDS(args)
 		hits_per_query_dik = box(args, assemblies)
 		itol(args, assemblies)
 	hits_per_query_dik2 = csv(args, assemblies)
@@ -97,7 +106,7 @@ def convert_id():
 	pass
 
 def get_seq_type(seqs):
-	
+	print ('seqs!!!!',seqs)	
 	#better with regex?
 	amino_acids = ['A','R','N','D','C','E','Q','G','H','I','L','K','M','F','P','S','T','W','Y','V']	
 	nucleotides = ['A','T','C','G','N','R','Y','S','W','K','M','B','D','H','V','N']
@@ -577,23 +586,6 @@ def sum_snps(args):
 			'-o', query + '_sum_snps']
 		call(cmd)
 	
-def genome_tree(args):
-
-	'''
-	Takes a tre file and anotes it with with gene variants
-	'''
-	#superceded by itol
-	percent_dict, query_seqs = parse_blast(args,dict_key = 'assembly', dict_value = 'percent')
-	t = Tree(args.phylogeny)
-	fout = open('percent.tsv','w')
-	header = '#Names\t' + '\t'.join(query_seqs) +'\n'
-	fout.write(header)
-	for ass in percent_dict:
-		fout.write(ass +'\t' + '\t'.join(percent_dict.get(ass)) + '\n')
-	fout.close()
-
-	t = ClusterTree(args.phylogeny, 'percent.tsv')
-	t.render('heatmap.svg','heatmap')
 
 def variant_types(args, assemblies):
 
@@ -915,12 +907,57 @@ def box(args, assemblies):
 		plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg", figsize=(22,22))
 	return labels
 
-def six_frame_translation():
+def DNDS(args):
+    print ('DNDS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    query_seqs = get_query_seqs(args)
+    d = collections.defaultdict(list)
+    print (query_seqs)
+    for gene in query_seqs:
+        print (gene)
+        dnds_in = gene + '_nuc_seqs.aln'
+        try:
+            for i, record in enumerate(SeqIO.parse(dnds_in,'fasta')):
+                if i == 0:
+                    ref = record
+                else:
+                    seq1 = SeqRecord(Seq(str(ref.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
+                    seq2 = SeqRecord(Seq(str(record.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
 
-	'''
-	Translate nucleotide sequence to all six frames of protein
-	'''
-	pass
+                    #aln prot
+                    tmp_aln = 'tmp.aln'
+                    tmp_fa = 'tmp.fa'
+                    with open('tmp.fa','w') as fout:
+                        for seqxx in [ref, record]:
+                            record_prot = SeqRecord(Seq(str(seqxx.seq),generic_dna), id=seqxx.id)
+                            record_prot.seq = record_prot.seq.translate(table=11)
+                            SeqIO.write(record_prot, fout, 'fasta')
+                    cline = MuscleCommandline(input=tmp_fa,out=tmp_aln)
+                    stdout1,stderr1 = cline()
+
+                    #add prot
+                    for i, aa_record in enumerate(SeqIO.parse('tmp.aln','fasta')):
+                        if aa_record.id == ref.id:
+                            pro1 = SeqRecord(Seq(str(aa_record.seq), alphabet=IUPAC.protein),id='pro1')
+                        else:
+                            pro2 = SeqRecord(Seq(str(aa_record.seq), alphabet=IUPAC.protein),id='pro2')
+
+                    #make aln object
+                    aln = MultipleSeqAlignment([pro1, pro2])
+                    codon_aln = codonalign.build(aln, [seq1, seq2])
+
+                    #get dnds
+                    dN, dS = cal_dn_ds(codon_aln[0], codon_aln[1], method='NG86')  
+                    print ('dN, dS',dN, dS)
+                    try: dNdS = dN/dS
+                    except: dNdS = 0.0    
+                    d[gene].append(dNdS)
+
+        except:
+            print ('DNDS failed for', gene)
+            print (dnds_in ,os.path.exits(dnds_in))
+    with open('DNDS.csv','w') as fout:
+        for sample in d:
+            fout.write(sample+','+str(np.median(d.get(sample)))+'\n')
 
 def reg (name, reject_set, reject_dik, query, reason):
 
