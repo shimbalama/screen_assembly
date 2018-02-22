@@ -903,12 +903,11 @@ def box(args, assemblies):
 	return labels
 
 def DNDS(args):
-    print ('DNDS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    
     query_seqs = get_query_seqs(args)
+    query_seqs = list(query_seqs)
     d = collections.defaultdict(list)
-    print (query_seqs)
     for gene in query_seqs:
-        print (gene)
         dnds_in = gene + '_nuc_seqs.aln'
         try:
             for i, record in enumerate(SeqIO.parse(dnds_in,'fasta')):
@@ -950,9 +949,17 @@ def DNDS(args):
         except:
             print ('DNDS failed for', gene)
             print (dnds_in ,os.path.exits(dnds_in))
+    print (d)
     with open('DNDS.csv','w') as fout:
+        fout.write('sample,median,'+','.join(query_seqs) +'\n')
         for sample in d:
-            fout.write(sample+','+str(np.median(d.get(sample)))+'\n')
+            fout.write(sample+','+str(np.median(d.get(sample)))+',')
+            for i, query in enumerate(query_seqs):
+                if i == 0:
+                    fout.write('used as ref,')
+                else:
+                    fout.write(str(d.get(sample)[i-1])+',')
+            fout.write('\n')
 
 def reg (name, reject_set, reject_dik, query, reason):
 
