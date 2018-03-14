@@ -14,8 +14,8 @@ import sys
 from ete3 import Tree, ClusterTree
 import random
 import shutil
-sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
-import lab_modules
+sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules')#Set this specific to you
+from lab_modules import *
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -55,15 +55,17 @@ def main ():
 	print (assemblies)	
 	blast_type = blast(args)
 	fasta(args)
+	boot_hits_at_contig_breaks(args, args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta')
 	if not args.fast_mode:
 		align(args, blast_type)
 		gene_tree(args, blast_type)
 		variant_types(args, assemblies)
 		plot_vars(args)
 		var_pos_csv(args)
-		DNDS(args)
+		if not args.operon:
+			DNDS(args)
 		hits_per_query_dik = box(args, assemblies)
-		itol(args, assemblies)
+	itol(args, assemblies)
 	hits_per_query_dik2 = csv(args, assemblies)
 	if not args.fast_mode:
 		try:
@@ -94,168 +96,6 @@ def main ():
 		shutil.move(rax_file,directory + '/' + rax_file)
 	for rax_file in glob('*.fasta'):
 		shutil.move(rax_file,directory + '/' + rax_file)
-
-def convert_id():
-	
-	'''
-	Removes # from sanger ids
-	Oppitionally adds 'LD_' to id name (for regex)
-	'''
-	pass
-
-def get_seq_type(seqs):
-	print ('seqs!!!!',seqs)	
-	#better with regex?
-	amino_acids = ['A','R','N','D','C','E','Q','G','H','I','L','K','M','F','P','S','T','W','Y','V']	
-	nucleotides = ['A','T','C','G','N','R','Y','S','W','K','M','B','D','H','V','N']
-	# from http://www.bioinformatics.org/sms/iupac.html
-	protein = False
-	DNA = True
-	b = False
-	for record in SeqIO.parse(seqs,'fasta'):
-		for pos in str(record.seq).upper():
-			if pos not in nucleotides:
-				DNA  = False
-				protein = True
-				b = True
-				break #speed it up..
-			elif pos not in nucleotides and pos not in amino_acids:
-				print ('Error, not DNA or protein: ', pos, ' in ', record)
-				protein = False
-				sys.exit(0)
-		break
-		
-	if DNA:
-		seq_type = 'DNA'
-	elif protein:
-		seq_type = 'prot'
- 		
-	return seq_type
-
-
-def cat(args):
-
-	'''
-	Concatenates assemblies; takes n assemblies and makes one file with all contigs
-	'''
-	print ('cating assemblies...')
-	if os.path.isfile(args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'):
-		make = False	
-	else:
-		if not os.path.exists(args.input_folder + '/concatenated_assmblies'):
-			os.makedirs(args.input_folder + '/concatenated_assmblies')
-		make = True
-		fout = open(args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta', 'w')
-	assemblies = set([])
-	#test if allready cated
-	assemblies_names = glob(args.input_folder + '/*')
-	if make:
-		for assembly in glob(args.input_folder + '/*'):
-			ass_file_name = assembly.strip().split('/')[-1].split('.')
-			if ass_file_name == ['concatenated_assmblies']:
-				continue	
-			try:
-				assert len(ass_file_name) == 2
-			except:
-				print ('len(ass_file_name) ==', len(ass_file_name), ass_file_name)
-				sys.exit(0)
-			ass_file_name = ass_file_name[0]
-			assemblies.add(ass_file_name)
-			for i, record in enumerate(SeqIO.parse(assembly, 'fasta')):
-				record.id = ass_file_name + '_' + str(i)#can't handle all the variablity any other way
-				SeqIO.write(record,fout,'fasta')
-	if make:
-		fout.close()
-	#If pre cated
-	print ('Getting assembly names...')
-	for record in SeqIO.parse(args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta', 'fasta'):
-		ass = '_'.join(record.id.split('_')[:-1])
-		if make:
-			assert ass in assemblies
-		assemblies.add(ass)
-	print (len(assemblies), 'assemblies used')
-	return assemblies
-
-
-def call_blast(args, blast_type, cat):
-
- 
-	
-	#cant use qcov_hsp_perc with cline (HSP = High- scoring Segment Pair )
-	cmd = [blast_type,
-	'-query', args.query,
-	'-db', cat,
-	'-out', 'blast_out.txt',
-	'-outfmt', '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen slen qcovhsp',
-	'-max_target_seqs', '500000',
-	'-qcov_hsp_perc', args.percent_length,
-	'-num_threads', args.threads]
-
-	if blast_type == 'blastn':
-		cmd += ['-perc_identity', args.percent_identity]
-	call(cmd)	
-
-
-def blast(args):
-
-	'''
-	Blasts (Nuc or Prot) seq/s of interest (Query) against db of concatenated 
-	assemblies(contigs)/CDS/proteins
-	'''
-	print ('testing query seqs')
-	seq_type_query = get_seq_type(args.query)
-	print ('fine -> ', seq_type_query)
-	print ('testing db seqs')
-	cat = args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'
-	seq_type_db = get_seq_type(cat)
-	print ('fine -> ', seq_type_db)
-	#db
-	if seq_type_db == 'DNA':
-		seq_type = 'nucl'
-	else:
-		seq_type = 'prot'
-	try:
-		call(['makeblastdb',
-		'-in', cat,
-		'-parse_seqids',
-		'-dbtype', seq_type])
-	except:
-		print ('you need to install makeblastdb or fix paths to it')
-
-	#blast
-	if seq_type_query == 'DNA' and seq_type_db == 'DNA':
-		blast_type = 'blastn'
-		call_blast(args, 'blastn', cat)
-		print ('Running blastn...')
-	elif seq_type_query == 'prot' and seq_type_db == 'prot':
-		blast_type = 'blastp'
-		call_blast(args, 'blastp', cat)
-		print ('Running blastp...')
-	elif seq_type_query == 'prot' and seq_type_db == 'DNA':
-		blast_type = 'tblastn'
-		call_blast(args, 'tblastn', cat)
-		print ('Running tblastn...')
-	else:
-		print ("Error with sequence type, can't run blastn, blastp or tblastx")
-	
-	return blast_type
-
-def direct_str():
-
-	'''
-	Exact match search - faster than blast, same output.
-	Required for peptides < 10 aa long
-	'''
-	pass
-
-
-def get_query_seqs(args):
-
-	query_seqs = {} 
-	for record in SeqIO.parse(args.query, 'fasta'):
-		query_seqs[record.id] = record
-
-	return query_seqs
 
 def csv(args, assemblies, binary = True):
 	
@@ -296,45 +136,7 @@ def csv(args, assemblies, binary = True):
 	if binary:
 		return hits_per_query
 
-def fasta(args,  blast_folder = 'blast'):
-
-	'''
-	Makes a fasta file of all hits for each query
-	'''
-
-	print ('Cutting seqs from db for fasta ...')
-
-	query_seqs = get_query_seqs(args)
-	for query in query_seqs:
-		
-		#make oonfig file from blast output
-		current = query + '_config.txt'
-		fout = open(current,'w')
-		with open('blast_out.txt', 'r') as fin:
-			for line in fin:
-				bits = line.strip().split()
-				if float(bits[2]) < (float(args.percent_identity) -1.0):
-					continue
-				if bits[0] == query:
-					contig = bits[1] 
-					seq_start = bits[8]
-					seq_end = bits[9]
-					if int(seq_start) > int(seq_end):#minus/plus is right, although seems backwards..
-						line = ' '.join([contig, seq_end + '-' + seq_start, 'minus'])
-						fout.write(line + '\n')
-					else:
-						line = ' '.join([contig, seq_start + '-' + seq_end, 'plus'])
-						fout.write(line + '\n')
-		fout.close()
-
-		#Cut seq of interest out of contig
-		cat = args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'
-		cmd = ['blastdbcmd',
-			'-db', cat,
-			'-entry_batch', current,
-			'-out', query + '_seqs_with_contig_breaks.fasta']
-		call(cmd)
-		boot_hits_at_contig_breaks(args, query, cat)
+	#boot_hits_at_contig_breaks(args, query, cat)  wtf?
 
 def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, record):
 
@@ -350,36 +152,41 @@ def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, 
 		SeqIO.write(record_query, fout,'fasta')
 
 
-def boot_hits_at_contig_breaks(args, query, cat):
+def boot_hits_at_contig_breaks(args, cat):
 
-	'''
-	Identifies and removes hits that touch a contig break
-	'''
-	seq_type_db = get_seq_type(cat)
-	if seq_type_db != 'prot':
-
-		print ('Identiying contig breaks...')
-		query_seqs = {}
-		for record in SeqIO.parse(query + '_seqs_with_contig_breaks.fasta','fasta'):
-			query_seqs[record.id] = record
-		fout = open(query + '_seqs.fasta','w')#Don't touch contig break
-		fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
-		for record in SeqIO.parse(cat,'fasta'):
-			if record.id in query_seqs:
-				found = False
-				query = str(query_seqs.get(record.id).seq).upper()
-				contig = str(record.seq).upper()#contig
-				if query in contig:
-					boot_functionality(args, fout, fout2, 'Fwd', contig, query, query_seqs, record)
-					found = True
-				else:
-					record.seq = record.seq.reverse_complement()
-					contig = str(record.seq).upper()
-					boot_functionality(args, fout, fout2, 'Rev', contig, query, query_seqs, record)
-					found = True
-				assert found
-		fout.close()
-		fout2.close()
+    '''
+    Identifies and removes hits that touch a contig break
+    '''
+    query_seqs = get_query_seqs(args)
+    for query in query_seqs:
+        seq_type_db = get_seq_type(cat)
+        if seq_type_db != 'prot':
+            print ('Identiying contig breaks...')
+            query_seqs = {}
+            for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
+                if ':' in record.id:#sometimes randomly adds coordinates? wtf
+                    id_, pos = record.id.strip().split(':')
+                    record.id = id_
+                    record.decription = pos
+                query_seqs[record.id] = record
+            fout = open(query + '_seqs_without_contig_break.fasta','w')#Don't touch contig break
+            fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
+            for record in SeqIO.parse(cat,'fasta'):
+                if record.id in query_seqs:
+                    found = False
+                    query = str(query_seqs.get(record.id).seq).upper()
+                    contig = str(record.seq).upper()#contig
+                    if query in contig:
+                        boot_functionality(args, fout, fout2, 'Fwd', contig, query, query_seqs, record)
+                        found = True
+                    else:
+                        record.seq = record.seq.reverse_complement()
+                        contig = str(record.seq).upper()
+                        boot_functionality(args, fout, fout2, 'Rev', contig, query, query_seqs, record)
+                        found = True
+                    assert found
+            fout.close()
+            fout2.close()
 
 
 def make_fasta_non_redundant(args, query, seq_type):
@@ -388,13 +195,10 @@ def make_fasta_non_redundant(args, query, seq_type):
 	Boil each multi fasta down to unique seqs for every query - at aa level
 	'''
 	print ('Eliminating redundant seqs...')	
-	redundant_map = {}
+	redundant_map = collections.defaultdict(list)
 	for i, record in enumerate(SeqIO.parse(query + '_seqs_and_ref_' + seq_type + '.fasta','fasta')):
 		seq_str = str(record.seq)
-		if seq_str not in redundant_map:
-			redundant_map[seq_str] = [record.id]
-		else:
-			redundant_map[seq_str].append(record.id)
+		redundant_map[seq_str].append(record.id)
 	print (query,'total seqs = ',i+1, ' .Non redundant = ',len(redundant_map))
 	
 	#write non redundant fasta
@@ -467,7 +271,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
 	if seq_type == 'aa':
 		fout2 = open(query + '_seqs_and_ref_' + seq_type + '_multiple_stops.fasta','w')
 	catch_multiple_hits = set([])
-	for record in SeqIO.parse(query + '_seqs.fasta', 'fasta'):
+	for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
 		ass = '_'.join(record.id.split('_')[:-1])
 		if ass in catch_multiple_hits:
 			print ('record excluded due to multple hits:', record)
@@ -515,7 +319,7 @@ def align(args, blast_type, directory = 'muscle_and_raxml'):
 	for query in query_seqs:
 		if blast_type == 'blastp':#no nuc output if prot query used
 			fout = add_ref(query_seqs, query, 'aa', blast_type)
-			with open(query + '_seqs.fasta','r') as fin:
+			with open(query + '_seqs_without_contig_break.fasta','r') as fin:
 				for line in fin:
 					fout.write(line)
 			fout.close()
@@ -543,11 +347,11 @@ def gene_tree(args, directory = 'muscle_and_raxml'):
 			'-m', model,
 			'-p', '12345',
 			'-T', args.threads]
-		call(cmd)
+	boot_hits_at_contig_breaks	call(cmd)
 	'''
 	query_seqs = get_query_seqs(args)
 	for query in query_seqs:
-		lab_modules.tree(args, query, '_nuc_seqs.aln')
+		tree(args, query, '_nuc_seqs.aln')
 
 def sum_snps(args):
 
