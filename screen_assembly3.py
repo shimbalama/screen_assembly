@@ -14,7 +14,7 @@ import sys
 from ete3 import Tree, ClusterTree
 import random
 import shutil
-sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules')#Set this specific to you
+sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
 import lab_modules
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
