@@ -1,5 +1,7 @@
 # screen_assembly - last updated on 23rd March 2018
 
+# Applologies for the formatting - please see the wiki for an easier to read version.
+
 Screen a bacterial assemblies (contigs/CDS or proteins) for nucleotide or protein sequences.
 
 Required dependencies:
