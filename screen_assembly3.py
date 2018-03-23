@@ -80,10 +80,10 @@ def main ():
             print ('from csv', hits_per_query_dik2)
             sys.exit(0)
         if args.plots:
-            variant_types(args, assemblies)
             if args.operon:
                 plot_vars(args, 'nuc')
             else:
+                variant_types(args, assemblies)
                 plot_vars(args)   
             var_pos_csv(args)
     if args.raxml:
@@ -640,9 +640,12 @@ def box(args, assemblies):
     #See how many are left
     labels = {}#try use ordered dict if still no order
     for query in query_seqs:
-        for i, record in enumerate(SeqIO.parse(query + '_aa_seqs.aln', 'fasta')):
-            #print record.id 
-            remaining_seqs = i #not i + 1 cuz ref in there
+        if args.operon:
+            for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
+                  remaining_seqs = i #not i + 1 cuz ref in there
+        else:
+            for i, record in enumerate(SeqIO.parse(query + '_aa_seqs.aln', 'fasta')):
+                remaining_seqs = i #not i + 1 cuz ref in there
         labels[query] = remaining_seqs
         if query not in percent_dict:
             percent_dict[query] = [0.0]
