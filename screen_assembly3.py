@@ -24,6 +24,7 @@ from Bio.Align.Applications import MuscleCommandline
 from Bio.Alphabet import generic_dna
 from Bio.codonalign.codonseq import cal_dn_ds
 from Bio import codonalign
+import multiprocessing
 
 def main ():
 
@@ -57,20 +58,40 @@ def main ():
     args = parser.parse_args()
     print ('args',args)	
     #run
-    for query in get_query_seqs(args):
+    query_seqs = list(get_query_seqs(args))
+    for query in query_seqs:
         if os.path.exists(query):
             for gene_file in glob(query+'/*'):
-                shutil.move(gene_file, gene_file.split('/')[-1])
+                try: shutil.move(gene_file, gene_file.split('/')[-1])
+                except: pass
             
     assemblies = cat(args)
-    print (assemblies)	
+    print ('Working with ' +str(len(assemblies)) + ' assemblies') 
+    print ('Starting Blast...')
     blast_type = blast(args)
-    fasta(args)
-    boot_hits_at_contig_breaks(args, args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta')
+    print ('Snipping sequences from db and checking for contigs breaks...')
+    for i in range(0, len(query_seqs), int(args.threads)):
+        chunk = query_seqs[i:i + int(args.threads)]
+        tmp = [(args, query) for query in chunk]
+        p = multiprocessing.Pool(processes = int(args.threads))
+        p.map(fasta, tmp)
+        p.close()
+        p = multiprocessing.Pool(processes = int(args.threads))
+        p.map(boot_hits_at_contig_breaks, tmp)
+        p.close()
+    print ('Making an itol template...')
     itol(args, assemblies)
+    print ('Making a CSV summary of results...')
     hits_per_query_dik2 = csv(args, assemblies)
     if args.aln:
-        align(args, blast_type)
+        print ('Running Muscle...')
+        for i in range(0, len(query_seqs), int(args.threads)):
+            chunk = query_seqs[i:i + int(args.threads)]
+            tmp = [(args, blast_type, query) for query in chunk]
+            p = multiprocessing.Pool(processes = int(args.threads))
+            p.map(align, tmp)
+            p.close()
+        print ('Making a Box plot')
         hits_per_query_dik = box(args, assemblies)
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
@@ -80,6 +101,7 @@ def main ():
             print ('from csv', hits_per_query_dik2)
             sys.exit(0)
         if args.plots:
+            print ('Plotting...')
             if args.operon:
                 plot_vars(args, 'nuc')
             else:
@@ -87,9 +109,11 @@ def main ():
                 plot_vars(args)   
             var_pos_csv(args)
     if args.raxml:
+        print ('Running RAXML... please be patient!')
         gene_tree(args, blast_type)
     if not args.operon:
         if args.dNdS:
+            print ('Calculating dNdS...')
             DNDS(args)
     #csv(args, assemblies, False) #non binary hits
     #Tidy
@@ -103,6 +127,39 @@ def main ():
                 pass#lazy dir into itself handle
     for i in glob('*_seqs.aln.reduced'):
         os.remove(i)
+    versions(args)
+    boil_down(args)
+    print ('Done!')
+
+def boil_down(args):
+
+    '''
+    just report hits
+    '''
+    with open('binary_hits_boiled_down.csv','w') as fout:
+        with open('binary_hits.csv','r') as fin:
+            genes = fin.readline().strip().split(',')
+            for line in fin:
+                bits = line.strip().split(',')
+                for i, bit in enumerate(bits):
+                    if i ==0:
+                        fout.write(bit+',')
+                    if bit == '1':
+                        fout.write(genes[i]+',')
+                fout.write('\n')
+
+def versions(args):
+    
+    '''
+    Save wrapped program version to text
+    '''
+
+    with open('versions.txt', 'w') as fout:
+        call(['blastn', '-version'], stdout=fout)
+        if args.aln:
+            call(['muscle', '-version'], stdout=fout)
+        if args.raxml:
+            call([args.raxml_executable, '-v'], stdout=fout)
 
 def csv(args, assemblies, binary = True):
     
@@ -159,19 +216,17 @@ def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, 
 		SeqIO.write(record_query, fout,'fasta')
 
 
-def boot_hits_at_contig_breaks(args, cat):
+def boot_hits_at_contig_breaks(tup):
 
     '''
     Identifies and removes hits that touch a contig break
     '''
-    query_seqs = get_query_seqs(args)
-    for query in query_seqs:
-        seq_type_db = get_seq_type(cat)
-        if seq_type_db != 'prot':
-            print ('Identiying contig breaks...')
-            query_seqs = {}
-            if os.path.exists(query + '_seqs_without_contig_break.fasta'):
-                continue #don't redo if already done when re-running
+    args, query = tup
+    cat = args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'
+    seq_type_db = get_seq_type(cat)
+    if seq_type_db != 'prot':
+        query_seqs = {}
+        if not os.path.exists(query + '_seqs_without_contig_break.fasta'): #don't redo if already done when re-running
             for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
                 if ':' in record.id:#sometimes randomly adds coordinates? wtf
                     id_, pos = record.id.strip().split(':')
@@ -262,11 +317,11 @@ def gap_plot(args, query, seq_type):
 def muscle(args, query, seq_type):
 	
     if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
-        call(['muscle',
+        call(['muscle', '-quiet',
             '-in', query + '_non_redundant.fasta',
             '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
     if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):	
-        call(['muscle',
+        call(['muscle', '-quiet',
             '-in', query + '_seqs_and_ref_' + seq_type + '.fasta',
             '-out', query + '_' + seq_type + '_seqs.aln'])
     if seq_type == 'aa':
@@ -318,36 +373,31 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     muscle(args, query, seq_type)
 
 	
-def align(args, blast_type, directory = 'muscle_and_raxml'):
+def align(tup):
 
     '''
     Aligns fastas with muscle
     '''
-
-    if not os.path.exists(directory):
-                os.makedirs(directory)
-
-    query_seqs = get_query_seqs(args)
-    for query in query_seqs:
-        if blast_type == 'blastp':#no nuc output if prot query used
-            fout = add_ref(query_seqs, query, 'aa', blast_type)
-            with open(query + '_seqs_without_contig_break.fasta','r') as fin:
-                for line in fin:
-                    fout.write(line)
-            fout.close()
-            make_fasta_non_redundant(args, query, 'aa')
-            muscle(args, query, 'aa')
-        elif blast_type == 'tblastn':#this dup needs to be a function - if it works
-            seq_type = 'aa'
-            #add ref - should this be separate file?
-            translated(args, query_seqs, query, seq_type, blast_type)	
-        else:
-            for seq_type in ['nuc','aa']:
-                print ('args.operon and seq_type == aa',args.operon, seq_type)
-                if args.operon and seq_type == 'aa':
-                    continue
-                print ('aln!!!!!')
-                translated(args, query_seqs, query, seq_type, blast_type)
+    args, blast_type, query = tup
+    if blast_type == 'blastp':#no nuc output if prot query used
+        fout = add_ref(query_seqs, query, 'aa', blast_type)
+        with open(query + '_seqs_without_contig_break.fasta','r') as fin:
+            for line in fin:
+                fout.write(line)
+        fout.close()
+        make_fasta_non_redundant(args, query, 'aa')
+        muscle(args, query, 'aa')
+    elif blast_type == 'tblastn':#this dup needs to be a function - if it works
+        seq_type = 'aa'
+        #add ref - should this be separate file?
+        translated(args, query_seqs, query, seq_type, blast_type)	
+    else:
+        for seq_type in ['nuc','aa']:
+            print ('args.operon and seq_type == aa',args.operon, seq_type)
+            if args.operon and seq_type == 'aa':
+                continue
+            print ('aln!!!!!')
+            translated(args, query_seqs, query, seq_type, blast_type)
 
 
 def gene_tree(args, directory = 'muscle_and_raxml'):
@@ -772,7 +822,6 @@ def rejects(args):
 		reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
 		#reject_set, reject_dik = reg(query + '_seqs_with_contig_breaks.fasta', reject_set, reject_dik, query, 'Contig')
 		if not args.operon:
-			print ('omiting stops...')
 			reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
 	return reject_set, reject_dik
 
