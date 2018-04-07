@@ -24,6 +24,7 @@ from Bio.Align.Applications import MuscleCommandline
 from Bio.Alphabet import generic_dna
 from Bio.codonalign.codonseq import cal_dn_ds
 from Bio import codonalign
+import multiprocessing
 
 def main ():
 
@@ -35,11 +36,8 @@ def main ():
     If 'assemblies' are accually proteins sequences and queries are protein sequence then blastp used.
     If assemblies are nucleotide sequence and query is protein then tblastn is used.
     '''
-    #2do - make cated assemblies a tmp file on external hdd, too big for mac hdd
     #Args
     parser = argparse.ArgumentParser(description='Screens assemblies for given gene/genes/proteins/operons.')
-    #parser.add_argument("-i", "--input", type=str, help="Directory with assemblies") 
-    #(rax requires that the call be in the dir)
     parser.add_argument("-q", "--query", type=str, help="Query sequences fasta.")
     parser.add_argument("-t", "--threads", type=str, help="How many threads to give blast, muscle, raxml etc.", default = '4')
     parser.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
@@ -57,20 +55,40 @@ def main ():
     args = parser.parse_args()
     print ('args',args)	
     #run
-    for query in get_query_seqs(args):
+    query_seqs = list(get_query_seqs(args))
+    for query in query_seqs:
         if os.path.exists(query):
             for gene_file in glob(query+'/*'):
-                shutil.move(gene_file, gene_file.split('/')[-1])
+                try: shutil.move(gene_file, gene_file.split('/')[-1])
+                except: pass
             
     assemblies = cat(args)
-    print (assemblies)	
+    print ('Working with ' +str(len(assemblies)) + ' assemblies') 
+    print ('Starting Blast...')
     blast_type = blast(args)
-    fasta(args)
-    boot_hits_at_contig_breaks(args, args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta')
+    print ('Snipping sequences from db and checking for contigs breaks...')
+    for i in range(0, len(query_seqs), int(args.threads)):
+        chunk = query_seqs[i:i + int(args.threads)]
+        tmp = [(args, query) for query in chunk]
+        p = multiprocessing.Pool(processes = int(args.threads))
+        p.map(fasta, tmp)
+        p.close()
+        p = multiprocessing.Pool(processes = int(args.threads))
+        p.map(boot_hits_at_contig_breaks, tmp)
+        p.close()
+    print ('Making an itol template...')
     itol(args, assemblies)
+    print ('Making a CSV summary of results...')
     hits_per_query_dik2 = csv(args, assemblies)
     if args.aln:
-        align(args, blast_type)
+        print ('Running Muscle...')
+        for i in range(0, len(query_seqs), int(args.threads)):
+            chunk = query_seqs[i:i + int(args.threads)]
+            tmp = [(args, blast_type, query) for query in chunk]
+            p = multiprocessing.Pool(processes = int(args.threads))
+            p.map(align, tmp)
+            p.close()
+        print ('Making a Box plot')
         hits_per_query_dik = box(args, assemblies)
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
@@ -80,6 +98,7 @@ def main ():
             print ('from csv', hits_per_query_dik2)
             sys.exit(0)
         if args.plots:
+            print ('Plotting...')
             if args.operon:
                 plot_vars(args, 'nuc')
             else:
@@ -87,11 +106,12 @@ def main ():
                 plot_vars(args)   
             var_pos_csv(args)
     if args.raxml:
+        print ('Running RAXML... please be patient!')
         gene_tree(args, blast_type)
     if not args.operon:
         if args.dNdS:
+            print ('Calculating dNdS...')
             DNDS(args)
-    #csv(args, assemblies, False) #non binary hits
     #Tidy
     for query in get_query_seqs(args):
         if not os.path.exists(query):
@@ -103,6 +123,39 @@ def main ():
                 pass#lazy dir into itself handle
     for i in glob('*_seqs.aln.reduced'):
         os.remove(i)
+    versions(args)
+    boil_down(args)
+    print ('Done!')
+
+def boil_down(args):
+
+    '''
+    just report hits
+    '''
+    with open('binary_hits_boiled_down.csv','w') as fout:
+        with open('binary_hits.csv','r') as fin:
+            genes = fin.readline().strip().split(',')
+            for line in fin:
+                bits = line.strip().split(',')
+                for i, bit in enumerate(bits):
+                    if i ==0:
+                        fout.write(bit+',')
+                    if bit == '1':
+                        fout.write(genes[i]+',')
+                fout.write('\n')
+
+def versions(args):
+    
+    '''
+    Save wrapped program version to text
+    '''
+
+    with open('versions.txt', 'w') as fout:
+        call(['blastn', '-version'], stdout=fout)
+        if args.aln:
+            call(['muscle', '-version'], stdout=fout)
+        if args.raxml:
+            call([args.raxml_executable, '-v'], stdout=fout)
 
 def csv(args, assemblies, binary = True):
     
@@ -143,7 +196,6 @@ def csv(args, assemblies, binary = True):
     
     return hits_per_query
 
-    #boot_hits_at_contig_breaks(args, query, cat)  wtf?
 
 def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, record):
 
@@ -159,19 +211,17 @@ def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, 
 		SeqIO.write(record_query, fout,'fasta')
 
 
-def boot_hits_at_contig_breaks(args, cat):
+def boot_hits_at_contig_breaks(tup):
 
     '''
     Identifies and removes hits that touch a contig break
     '''
-    query_seqs = get_query_seqs(args)
-    for query in query_seqs:
-        seq_type_db = get_seq_type(cat)
-        if seq_type_db != 'prot':
-            print ('Identiying contig breaks...')
-            query_seqs = {}
-            if os.path.exists(query + '_seqs_without_contig_break.fasta'):
-                continue #don't redo if already done when re-running
+    args, query = tup
+    cat = args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'
+    seq_type_db = get_seq_type(cat)
+    if seq_type_db != 'prot':
+        query_seqs = {}
+        if not os.path.exists(query + '_seqs_without_contig_break.fasta'): #don't redo if already done when re-running
             for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
                 if ':' in record.id:#sometimes randomly adds coordinates? wtf
                     id_, pos = record.id.strip().split(':')
@@ -200,26 +250,25 @@ def boot_hits_at_contig_breaks(args, cat):
 
 def make_fasta_non_redundant(args, query, seq_type):
 
-	'''
-	Boil each multi fasta down to unique seqs for every query - at aa level
-	'''
-	print ('Eliminating redundant seqs...')	
-	redundant_map = collections.defaultdict(list)
-	for i, record in enumerate(SeqIO.parse(query + '_seqs_and_ref_' + seq_type + '.fasta','fasta')):
-		seq_str = str(record.seq)
-		redundant_map[seq_str].append(record.id)
-	print (query,'total seqs = ',i+1, ' .Non redundant = ',len(redundant_map))
-	
-	#write non redundant fasta
-	fout= open(query + '_non_redundant.fasta','w')
-	for i, seq in enumerate(redundant_map):
-		if 'ref' in redundant_map.get(seq):
-			fout.write('>0 ' + ','.join(redundant_map.get(seq))+'\n')
-		else:
-			#random_name = redundant_map.get(seq).pop()
-			fout.write('>'+ str(i + 1) + ' ' + ','.join(redundant_map.get(seq))+'\n')
-		fout.write(seq+'\n')
-	fout.close()
+    '''
+    Boil each multi fasta down to unique seqs for every query - at aa level
+    '''
+    redundant_map = collections.defaultdict(list)
+    for i, record in enumerate(SeqIO.parse(query + '_seqs_and_ref_' + seq_type + '.fasta','fasta')):
+        seq_str = str(record.seq)
+        redundant_map[seq_str].append(record.id)
+    
+     
+    #write non redundant fasta
+    fout= open(query + '_non_redundant.fasta','w')
+    if i > 1:
+        for i, seq in enumerate(redundant_map):
+            if 'ref' in redundant_map.get(seq):
+                fout.write('>0 ' + ','.join(redundant_map.get(seq))+'\n')
+            else:
+                fout.write('>'+ str(i + 1) + ' ' + ','.join(redundant_map.get(seq))+'\n')
+            fout.write(seq+'\n')
+    fout.close()
 
 def add_ref(query_seqs, query, seq_type, blast_type):
 
@@ -229,7 +278,6 @@ def add_ref(query_seqs, query, seq_type, blast_type):
 	fout = open(query + '_seqs_and_ref_' + seq_type + '.fasta','w')
 	fout.write('>ref\n')
 	record = query_seqs.get(query)
-	print (query_seqs)
 	if seq_type == 'aa':
 		try:
 			record.seq = record.seq.translate(table = 11)
@@ -241,43 +289,46 @@ def add_ref(query_seqs, query, seq_type, blast_type):
 
 def gap_plot(args, query, seq_type):
 
-	'''
-	Line plot of aln to see where gaps are
-	'''
-	d= collections.defaultdict(int)
-	for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundan_seqs.aln','fasta')):
-		seq_str = str(record.seq)
-		for j, aa in enumerate(seq_str):
-			if aa != '-':
-				d[j+1] += 1
+    '''
+    Line plot of aln to see where gaps are
+    '''
+    d= collections.defaultdict(int)
+    if os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):
+        for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundan_seqs.aln','fasta')):
+            seq_str = str(record.seq)
+            for j, aa in enumerate(seq_str):
+                    if aa != '-':
+                            d[j+1] += 1
 
-	plt.plot(d.values())
-	plt.axis([0, len(d), 0, max(d.values())+1])
-	plt.ylabel('Unique sequences')
-	plt.xlabel('Alignment length including gaps')
-	plt.title('Position of indels in ' + query + ' with ' + str(max(d.values())) + ' sequences')
-	plt.savefig(query +'_gaps.svg')
-	plt.close()
+        if i > 1:
+            plt.plot(d.values())
+            plt.axis([0, len(d), 0, max(d.values())+1])
+            plt.ylabel('Unique sequences')
+            plt.xlabel('Alignment length including gaps')
+            plt.title('Position of indels in ' + query + ' with ' + str(max(d.values())) + ' sequences')
+            plt.savefig(query +'_gaps.svg')
+            plt.close()
 
 def muscle(args, query, seq_type):
 	
     if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
-        call(['muscle',
+        call(['muscle', '-quiet',
             '-in', query + '_non_redundant.fasta',
             '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
     if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):	
-        call(['muscle',
+        call(['muscle', '-quiet',
             '-in', query + '_seqs_and_ref_' + seq_type + '.fasta',
             '-out', query + '_' + seq_type + '_seqs.aln'])
     if seq_type == 'aa':
+        print ('Start gap plot', query)
         gap_plot(args, query, seq_type)
-
+        print ('Finishd gap plot', query)
+    print ('Finishd aln and gap plot', query)
 def translated(args, query_seqs, query, seq_type, blast_type):
     
     '''
     Handles seq conversion if needed, excludes rubbish and multiple hits from further analysis
     '''
-    print ('translating and aligning')
     fout = add_ref(query_seqs, query, seq_type, blast_type)
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
@@ -318,53 +369,34 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     muscle(args, query, seq_type)
 
 	
-def align(args, blast_type, directory = 'muscle_and_raxml'):
+def align(tup):
 
     '''
     Aligns fastas with muscle
     '''
 
-    if not os.path.exists(directory):
-                os.makedirs(directory)
-
+    args, blast_type, query = tup
+    print ('start aln', query)
     query_seqs = get_query_seqs(args)
-    for query in query_seqs:
-        if blast_type == 'blastp':#no nuc output if prot query used
-            fout = add_ref(query_seqs, query, 'aa', blast_type)
-            with open(query + '_seqs_without_contig_break.fasta','r') as fin:
-                for line in fin:
-                    fout.write(line)
-            fout.close()
-            make_fasta_non_redundant(args, query, 'aa')
-            muscle(args, query, 'aa')
-        elif blast_type == 'tblastn':#this dup needs to be a function - if it works
-            seq_type = 'aa'
-            #add ref - should this be separate file?
-            translated(args, query_seqs, query, seq_type, blast_type)	
-        else:
-            for seq_type in ['nuc','aa']:
-                print ('args.operon and seq_type == aa',args.operon, seq_type)
-                if args.operon and seq_type == 'aa':
-                    continue
-                print ('aln!!!!!')
-                translated(args, query_seqs, query, seq_type, blast_type)
+    if blast_type == 'blastp':#no nuc output if prot query used
+        fout = add_ref(query_seqs, query, 'aa', blast_type)
+        with open(query + '_seqs_without_contig_break.fasta','r') as fin:
+            for line in fin:
+                fout.write(line)
+        fout.close()
+        make_fasta_non_redundant(args, query, 'aa')
+        muscle(args, query, 'aa')
+    elif blast_type == 'tblastn':
+        seq_type = 'aa'
+        translated(args, query_seqs, query, seq_type, blast_type)	
+    else:
+        for seq_type in ['nuc','aa']:
+            if args.operon and seq_type == 'aa':
+                continue
+            translated(args, query_seqs, query, seq_type, blast_type)
 
 
 def gene_tree(args, directory = 'muscle_and_raxml'):
-
-    '''
-    Makes a Raxml tree of alignments
-    model = 'PROTGAMMAWAG'
-    query_seqs = get_query_seqs(args)
-    for query in query_seqs:
-            cmd = ['raxmlHPC-PTHREADS',
-                    '-s', query + '_aa_non_redundan_seqs.aln',
-                    '-n', query + '.tre',
-                    '-m', model,
-                    '-p', '12345',
-                    '-T', args.threads]
-    boot_hits_at_contig_breaks	call(cmd)
-    '''
 
     query_seqs = get_query_seqs(args)
     for query in query_seqs:
@@ -462,7 +494,6 @@ def var_pos(args, seq_type, query):
 	'''
 	Get positions of vars in aa or nuc seqs
 	'''
-	print ('Get positions of vars: ', seq_type, query)	
 	#ref
 	ref_dik = collections.OrderedDict()
 	
@@ -508,7 +539,6 @@ def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_
 
 	df = pd.DataFrame(list_of_diks, index=list_of_dik_names)
 	df_bar = df.transpose()
-	#matplotlib.use('Agg')
 	n = 100 #ticks
 	ax = df_bar.plot.bar(figsize=(15,8), edgecolor = "none", width = 1, stacked=True)
 	ticks = ax.xaxis.get_ticklocs()
@@ -590,7 +620,6 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
 						ass = '_'.join(hit.split('_')[:-1])
 						tmp[query][ass].append(float(percent))
 		for query in tmp:
-			#print 'tmp.get(query)',tmp.get(query)
 			for ass in tmp.get(query):
 				biggest_hit = max(tmp[query][ass])
 				assert biggest_hit >= percent_identity
@@ -635,10 +664,8 @@ def box(args, assemblies):
     #Get data	
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
 
-    for i in percent_dict:
-        print (i, len(percent_dict.get(i)))
     #See how many are left
-    labels = {}#try use ordered dict if still no order
+    labels = {}
     for query in query_seqs:
         if args.operon:
             for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
@@ -649,7 +676,6 @@ def box(args, assemblies):
         labels[query] = remaining_seqs
         if query not in percent_dict:
             percent_dict[query] = [0.0]
-        print (query, remaining_seqs)
     keys = list(labels.copy().keys())#future proof incase very multi thread it
     #- https://blog.labix.org/2008/06/27/watch-out-for-listdictkeys-in-python-3
     for box_number, query_seq_names in enumerate([keys[i:i + 12] for i in range(0, len(keys), 12)]):
@@ -661,9 +687,6 @@ def box(args, assemblies):
                      carriage_bar.append(0.0)
                 else:
                     carriage_bar.append(100.0*(len(percent_dict.get(query))/float(number_of_assemblies)))
-        #carriage_bar = [100.0*(len(percent_dict.get(query))/float(number_of_assemblies)) for query in percent_dict if query in query_seq_names]
-        print ('carriage_bar',carriage_bar)
-        print ('variation_box',variation_box)
         #plot
         plt.figure()
         fig, ax = plt.subplots()
@@ -673,7 +696,6 @@ def box(args, assemblies):
         plt.ylabel('Percent variation (box & wisker)')
 
         ax2 = ax.twinx()
-        #ax2.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
         ax2.bar(ax.get_xticks(),carriage_bar,color='#eeefff',align='center')
         ax2.set_zorder(1)
         ax.set_zorder(2)
@@ -770,9 +792,7 @@ def rejects(args):
 		reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
 		reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
 		reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
-		#reject_set, reject_dik = reg(query + '_seqs_with_contig_breaks.fasta', reject_set, reject_dik, query, 'Contig')
 		if not args.operon:
-			print ('omiting stops...')
 			reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
 	return reject_set, reject_dik
 
