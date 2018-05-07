@@ -730,15 +730,21 @@ def DNDS(args):
     query_seqs = list(query_seqs)
     d = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
     for gene in query_seqs:
-        dnds_in = gene + '_nuc_seqs.aln'
+        dnds_in = gene + '_seqs_and_ref_nuc.fasta'
         try:#does all V all incase ref is an outlier
             for ref in SeqIO.parse(dnds_in,'fasta'):
                 for record in SeqIO.parse(dnds_in,'fasta'):
                     if ref.id == record.id:
                         continue
-                    seq1 = SeqRecord(Seq(str(ref.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
-                    seq2 = SeqRecord(Seq(str(record.seq), alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
+                    #trim to be divisable by 3
+                    min_len = min([len(str(ref.seq)), len(str(record.seq))])
+                    while min_len%3!=0:
+                        print (min_len)
+                        min_len -= 1
 
+                    seq1 = SeqRecord(Seq(str(ref.seq)[:min_len], alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
+                    seq2 = SeqRecord(Seq(str(record.seq)[:min_len], alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
+                     
                     #aln prot
                     tmp_aln = 'tmp.aln'
                     tmp_fa = 'tmp.fa'
@@ -763,7 +769,6 @@ def DNDS(args):
 
                     #get dnds
                     dN, dS = cal_dn_ds(codon_aln[0], codon_aln[1], method='NG86')  
-                    print ('dN, dS',dN, dS)
                     try: dNdS = dN/dS
                     except: dNdS = 0.0    
                     d[gene][ref.id][record.id] = dNdS
@@ -771,13 +776,10 @@ def DNDS(args):
         except:
             print ('DNDS failed for', gene)
             print (dnds_in ,os.path.exits(dnds_in))
-    print (d)
-    with open('dNdS_all.csv','w') as fout:
+    with open('dNdS_median_all_samples.csv','w') as fout:
         for gene in d:
             df = pd.DataFrame.from_dict(d.get(gene), orient='index')
             df.to_csv(gene + 'dNdS_raw.csv')
-            print ('ggggg',df)
-            print (np.median(df.median()))
             fout.write(gene+','+str(np.median(df.median()))+'\n')
 
 def reg(name, reject_set, reject_dik, query, reason):
