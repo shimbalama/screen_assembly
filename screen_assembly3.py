@@ -43,7 +43,7 @@ def main ():
     parser.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
     parser.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
     parser.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
-    parser.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-AVX2", default='raxmlHPC-PTHREADS-AVX2')
+    parser.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-SSE3", default='raxmlHPC-PTHREADS-SSE3')
     parser.add_argument("-d", "--dNdS", action='store_true', help="Calculate dNdS. Off by default.", default=False)
     parser.add_argument("-a", "--aln", action='store_false', help="Make alignments with muscle. On by default.", default=True)
     parser.add_argument("-x", "--plots", action='store_false', help="Make plots. On by default.", default=True)
@@ -55,13 +55,19 @@ def main ():
     args = parser.parse_args()
     print ('args',args)	
     #run
+
+    #put stuff back if re-running
     query_seqs = list(get_query_seqs(args))
     for query in query_seqs:
         if os.path.exists(query):
             for gene_file in glob(query+'/*'):
                 try: shutil.move(gene_file, gene_file.split('/')[-1])
                 except: pass
-            
+    for log_file in glob('logs/*'):
+        try: shutil.move(log_file, log_file.split('/')[-1])
+        except: pass
+
+    #start pipe    
     assemblies = cat(args)
     print ('Working with ' +str(len(assemblies)) + ' assemblies') 
     print ('Starting Blast...')
@@ -76,26 +82,25 @@ def main ():
         p = multiprocessing.Pool(processes = int(args.threads))
         p.map(boot_hits_at_contig_breaks, tmp)
         p.close()
+    for i in range(0, len(query_seqs), int(args.threads)):
+        chunk = query_seqs[i:i + int(args.threads)]
+        tmp = [(args, blast_type, query) for query in chunk]
+        p = multiprocessing.Pool(processes = int(args.threads))
+        p.map(process_seqs, tmp)
+        p.close()
     print ('Making an itol template...')
     itol(args, assemblies)
     print ('Making a CSV summary of results...')
     hits_per_query_dik2 = csv(args, assemblies)
     if args.aln:
-        print ('Running Muscle...')
-        for i in range(0, len(query_seqs), int(args.threads)):
-            chunk = query_seqs[i:i + int(args.threads)]
-            tmp = [(args, blast_type, query) for query in chunk]
-            p = multiprocessing.Pool(processes = int(args.threads))
-            p.map(align, tmp)
-            p.close()
         print ('Making a Box plot')
         hits_per_query_dik = box(args, assemblies)
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
         except:
             print ('Hits per csv dont match hits in the box plot!')
-            print ('from box',hits_per_query_dik)
-            print ('from csv', hits_per_query_dik2)
+            print ('from box plot (which is from query_aa_seqs.aln)',hits_per_query_dik)
+            print ('from csv binary hits (from blast)', hits_per_query_dik2)
             sys.exit(0)
         if args.plots:
             print ('Plotting...')
@@ -121,8 +126,8 @@ def main ():
                 shutil.move(query_output, query + '/' + query_output)
             except:
                 pass#lazy dir into itself handle
-    for i in glob('*_seqs.aln.reduced'):
-        os.remove(i)
+    for log in glob('*RAxML_*'):
+        shutil.move(log, 'logs/'+log)
     versions(args)
     boil_down(args)
     print ('Done!')
@@ -311,19 +316,21 @@ def gap_plot(args, query, seq_type):
 
 def muscle(args, query, seq_type):
 	
-    if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
-        call(['muscle', '-quiet',
-            '-in', query + '_non_redundant.fasta',
-            '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
+    #if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
+    #    call(['muscle', '-quiet',
+    #        '-in', query + '_non_redundant.fasta',
+    #        '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
     if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):	
         call(['muscle', '-quiet',
             '-in', query + '_seqs_and_ref_' + seq_type + '.fasta',
             '-out', query + '_' + seq_type + '_seqs.aln'])
-    if seq_type == 'aa':
-        print ('Start gap plot', query)
-        gap_plot(args, query, seq_type)
-        print ('Finishd gap plot', query)
-    print ('Finishd aln and gap plot', query)
+    #broken
+    #if seq_type == 'aa':
+    #    print ('Start gap plot', query)
+    #    gap_plot(args, query, seq_type)
+    #    print ('Finishd gap plot', query)
+    #print ('Finishd aln and gap plot', query)
+
 def translated(args, query_seqs, query, seq_type, blast_type):
     
     '''
@@ -332,7 +339,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     fout = add_ref(query_seqs, query, seq_type, blast_type)
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
-            fout2 = open(query + '_seqs_and_ref_' + seq_type + '_multiple_stops.fasta','w')
+        fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
     catch_multiple_hits = set([])
     for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
         ass = '_'.join(record.id.split('_')[:-1])
@@ -366,10 +373,11 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     if seq_type =='aa':
         fout2.close()
         make_fasta_non_redundant(args, query, seq_type)
-    muscle(args, query, seq_type)
+    if args.aln:
+        muscle(args, query, seq_type)
 
 	
-def align(tup):
+def process_seqs(tup):
 
     '''
     Aligns fastas with muscle
@@ -713,6 +721,7 @@ def box(args, assemblies):
         plt.ylabel('Percent carriage (bar)')
         plt.tight_layout()
         plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg", figsize=(22,22))
+    print ('box labels',labels)
     return labels
 
 def DNDS(args):
@@ -771,30 +780,32 @@ def DNDS(args):
             print (np.median(df.median()))
             fout.write(gene+','+str(np.median(df.median()))+'\n')
 
-def reg (name, reject_set, reject_dik, query, reason):
+def reg(name, reject_set, reject_dik, query, reason):
 
-	if os.path.exists(name):
-		for record in SeqIO.parse(name,'fasta'):
-			ass = '_'.join(record.id.split('_')[:-1])
-			reject_dik[ass][query].append(reason)
-			reject_set[query].add(record.id)
-	return reject_set, reject_dik
+    if os.path.exists(name):
+        for record in SeqIO.parse(name,'fasta'):
+            ass = '_'.join(record.id.split('_')[:-1])
+            reject_dik[ass][query].append(reason)
+            reject_set[query].add(record.id)
+    return reject_set, reject_dik
 
 def rejects(args):
 
-	'''
-	Get info pertiaing to seqs removed due to hitting a contig break or have multiple stops in aa seq
-	'''
-	reject_set = collections.defaultdict(set)
-	reject_dik = collections.defaultdict(lambda: collections.defaultdict(list))
-	query_seqs = get_query_seqs(args)
-	for query in query_seqs:
-		reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
-		reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
-		reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
-		if not args.operon:
-			reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
-	return reject_set, reject_dik
+    '''
+    Get info pertiaing to seqs removed due to hitting a contig break or have multiple stops in aa seq
+    '''
+    reject_set = collections.defaultdict(set)
+    reject_dik = collections.defaultdict(lambda: collections.defaultdict(list))
+    query_seqs = get_query_seqs(args)
+    for query in query_seqs:
+        reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
+        reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
+        reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
+        if not args.operon:
+            assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+            reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
+    
+    return reject_set, reject_dik
 
 if __name__ == "__main__":
-	main()
+    main()
