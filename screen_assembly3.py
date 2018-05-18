@@ -94,7 +94,7 @@ def main ():
     hits_per_query_dik2 = csv(args, assemblies)
     if args.aln:
         print ('Making a Box plot')
-        hits_per_query_dik = box(args, assemblies)
+        hits_per_query_dik = box(args, assemblies, blast_type)
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
         except:
@@ -105,11 +105,12 @@ def main ():
         if args.plots:
             print ('Plotting...')
             if args.operon:
-                plot_vars(args, 'nuc')
+                if blast_type != 'tblastn':#no ref in nuc
+                    plot_vars(args, 'nuc')
             else:
                 variant_types(args, assemblies)
                 plot_vars(args)   
-            var_pos_csv(args)
+            var_pos_csv(args, blast_type)
     if args.raxml:
         print ('Running RAXML... please be patient!')
         gene_tree(args, blast_type)
@@ -172,7 +173,7 @@ def csv(args, assemblies, binary = True):
     _, omit_dik = rejects(args)
 
     hits_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'query')
-    for csv in ['binary_hits', 'total_hits', 'hits_as_percentage']:
+    for csv in ['binary_hits', 'total_hits', 'length_and_sequence_identity']:
         with open(csv + '.csv', 'w') as fout:
             header = '#Names,' + ','.join(query_seqs) +'\n'
             fout.write(header)
@@ -189,8 +190,15 @@ def csv(args, assemblies, binary = True):
                             fout.write('1,')
                         if csv == 'total_hits':
                             fout.write(str(len(hits_dict.get(ass).get(query)))+',')
-                        if csv == 'hits_as_percentage':
-                            fout.write(str(max(hits_dict.get(ass).get(query)))+',')
+                        if csv == 'length_and_sequence_identity':
+                            max_tup = 0
+                            biggest_tup = ()
+                            for tup in hits_dict.get(ass).get(query):
+                                if sum(tup) > max_tup:
+                                    max_tup = sum(tup)
+                                    biggest_tup = tup
+                            length, percent = biggest_tup
+                            fout.write('percent_length='+str(length)+' percent_identity='+str(percent)+',')
                     else:
                         if omit_dik[ass][query]:
                             fout.write(omit_dik[ass][query][0] + ',')
@@ -222,7 +230,7 @@ def boot_hits_at_contig_breaks(tup):
     Identifies and removes hits that touch a contig break
     '''
     args, query = tup
-    cat = args.input_folder + '/concatenated_assmblies/concatenated_assmblies.fasta'
+    cat = args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'
     seq_type_db = get_seq_type(cat)
     if seq_type_db != 'prot':
         query_seqs = {}
@@ -277,20 +285,24 @@ def make_fasta_non_redundant(args, query, seq_type):
 
 def add_ref(query_seqs, query, seq_type, blast_type):
 
-	'''
-	Adds to ref for alignment
-	'''
-	fout = open(query + '_seqs_and_ref_' + seq_type + '.fasta','w')
-	fout.write('>ref\n')
-	record = query_seqs.get(query)
-	if seq_type == 'aa':
-		try:
-			record.seq = record.seq.translate(table = 11)
-		except:
-			pass #hack to not crash if is aa
-	fout.write(str(record.seq) + '\n')
-	
-	return fout
+    '''
+    Adds to ref for alignment
+    '''
+    
+    fout = open(query + '_seqs_and_ref_' + seq_type + '.fasta','w')
+    record = query_seqs.get(query)
+    if blast_type == 'tblastn' and seq_type == 'nuc':
+        return fout #don't want aa ref with nuc hits 
+    else:
+        fout.write('>ref\n')
+        if seq_type == 'aa':
+            try:
+                record.seq = record.seq.translate(table = 11)
+            except:
+                pass #hack to not crash if is aa
+    fout.write(str(record.seq) + '\n')
+    
+    return fout
 
 def gap_plot(args, query, seq_type):
 
@@ -316,10 +328,11 @@ def gap_plot(args, query, seq_type):
 
 def muscle(args, query, seq_type):
 	
-    #if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
-    #    call(['muscle', '-quiet',
-    #        '-in', query + '_non_redundant.fasta',
-    #        '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
+    print ('muscle call', query, seq_type)
+    if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
+        call(['muscle', '-quiet',
+            '-in', query + '_non_redundant.fasta',
+            '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
     if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):	
         call(['muscle', '-quiet',
             '-in', query + '_seqs_and_ref_' + seq_type + '.fasta',
@@ -340,14 +353,19 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
         fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
-    catch_multiple_hits = set([])
+    catch_multiple_hits = defaultdict(list)
     for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
         ass = '_'.join(record.id.split('_')[:-1])
-        if ass in catch_multiple_hits:
-            print ('record excluded due to multple hits:', record)
-            continue
-        else:
-            catch_multiple_hits.add(ass)
+        catch_multiple_hits[ass].append(record)
+    for ass in catch_multiple_hits:
+        #use longest (this might mean a low quality one if pl and pi are very low)
+        record_len = 0
+        if len(catch_multiple_hits.get(ass)) > 1:
+            print ('Sample ' + ass + ' has ' + str(len(catch_multiple_hits.get(ass))) +' hits for query ' + query)
+        for var in catch_multiple_hits.get(ass):
+            if len(str(var.seq)) > record_len:
+                record_len = len(str(var.seq))
+                record = var
         seq = str(record.seq).upper()
         if seq_type == 'nuc':
             if 'N' in seq:
@@ -360,7 +378,6 @@ def translated(args, query_seqs, query, seq_type, blast_type):
                 continue#got to double up for when have prot query...
             record.seq = record.seq.translate(table = 11)
             if args.operon:#keep seqs with stop if operon or kmer
-                print ('not omiting seqs with stops')
                 SeqIO.write(record,fout,'fasta')
             else:
                 if record.seq.count('*') > 1:
@@ -394,12 +411,12 @@ def process_seqs(tup):
         fout.close()
         make_fasta_non_redundant(args, query, 'aa')
         muscle(args, query, 'aa')
-    elif blast_type == 'tblastn':
-        seq_type = 'aa'
-        translated(args, query_seqs, query, seq_type, blast_type)	
+    #elif blast_type == 'tblastn':
+    #    seq_type = 'aa'
+    #    translated(args, query_seqs, query, seq_type, blast_type)	
     else:
         for seq_type in ['nuc','aa']:
-            if args.operon and seq_type == 'aa':
+            if args.operon and seq_type == 'aa' and blast_type == 'blastp':
                 continue
             translated(args, query_seqs, query, seq_type, blast_type)
 
@@ -477,67 +494,70 @@ def itol(args, assemblies):
 		fout.write('\n')
 	fout.close()
 
-def var_pos_csv(args):
+def var_pos_csv(args, blast_type):
 
-	'''
-	Csv of var pos for aa and nuc alns
-	'''
-	query_seqs = get_query_seqs(args)
-	for query in query_seqs:
-		for seq_type in ['nuc', 'aa']:
-			if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):
-				continue # skip nuc if using aa and or any seqs without hits
-			number_hits, ref_dik, length = var_pos(args, seq_type, query)
-			fout = open(query + '_' + seq_type + '_pos.csv','w')#checked 
-			for pos in ref_dik:
-				fout.write(ref_dik.get(pos)[0] +',')
-				for var in ref_dik.get(pos)[4]:
-					count = str(ref_dik.get(pos)[4].get(var))
-					fout.write(var + ',' + count + ',')
-				fout.write('\n')
-			fout.close()
+    '''
+    Csv of var pos for aa and nuc alns
+    '''
+    query_seqs = get_query_seqs(args)
+    for query in query_seqs:
+        for seq_type in ['nuc', 'aa']:
+            if blast_type == 'tblastn' and seq_type == 'nuc':
+                continue#no ref
+            if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):
+                continue # skip nuc if using aa and or any seqs without hits
+            number_hits, ref_dik, length = var_pos(args, seq_type, query)
+            fout = open(query + '_' + seq_type + '_pos.csv','w')#checked 
+            for pos in ref_dik:
+                fout.write(ref_dik.get(pos)[0] +',')
+                for var in ref_dik.get(pos)[4]:
+                    count = str(ref_dik.get(pos)[4].get(var))
+                    fout.write(var + ',' + count + ',')
+                fout.write('\n')
+            fout.close()
 
 def var_pos(args, seq_type, query):
 
-	'''
-	Get positions of vars in aa or nuc seqs
-	'''
-	#ref
-	ref_dik = collections.OrderedDict()
-	
-	for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
-		if record.id == 'ref':
-			ref_seq = str(record.seq)
-			for i, nuc in enumerate(ref_seq):
-				i+=1
-				ref_dik[str(i)] = [nuc,0,0,0,collections.defaultdict(int)]#[ref_nuc, count_of_snps, count_of_ins, count_of_del]
-	#hits
-	number_hits = 0
-	length = 10 # hack so doesn't fall over if no hits
-	for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
-		if record.id == 'ref':
-			continue
-		number_hits += 1 
-		seq = str(record.seq)
-		try:
-			assert len(seq) == len(ref_seq)
-			length = len(seq)
-		except:
-			print ('alignments need to be same length!')
-			print (len(seq),  len(ref_seq))
-		for i, nuc in enumerate(seq):
-			i+=1
-			if ref_dik.get(str(i))[0] == '-' and nuc == '-':
-				continue
-			elif ref_dik.get(str(i))[0] == '-':#ref is - & nuc != - == ins
-				ref_dik.get(str(i))[2] += 1
-			elif nuc == '-': #current seq is - == del
-				ref_dik.get(str(i))[3] += 1
-			else:
-				if ref_dik.get(str(i))[0] != nuc:
-					ref_dik.get(str(i))[1] += 1
-					ref_dik.get(str(i))[4][nuc] += 1
-	return number_hits, ref_dik, length
+    '''
+    Get positions of vars in aa or nuc seqs
+    '''
+    #ref
+    ref_dik = collections.OrderedDict()
+    print ('var posssss', seq_type, query)        
+    for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
+        if record.id == 'ref':
+            ref_seq = str(record.seq)
+            for i, nuc in enumerate(ref_seq):
+                i+=1
+                ref_dik[str(i)] = [nuc,0,0,0,collections.defaultdict(int)]#[ref_nuc, count_of_snps, count_of_ins, count_of_del]
+    #hits
+    number_hits = 0
+    length = 10 # hack so doesn't fall over if no hits
+    for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
+        if record.id == 'ref':
+            continue
+        number_hits += 1 
+        seq = str(record.seq)
+        try:
+            assert len(seq) == len(ref_seq)
+            length = len(seq)
+        except:
+            print ('alignments need to be same length!')
+            print (len(seq),  len(ref_seq))
+        for i, nuc in enumerate(seq):
+            i+=1
+            if ref_dik.get(str(i))[0] == '-' and nuc == '-':
+                continue
+            elif ref_dik.get(str(i))[0] == '-':#ref is - & nuc != - == ins
+                ref_dik.get(str(i))[2] += 1
+            elif nuc == '-': #current seq is - == del
+                ref_dik.get(str(i))[3] += 1
+            else:
+                if ref_dik.get(str(i))[0] != nuc:
+                    ref_dik.get(str(i))[1] += 1
+                    ref_dik.get(str(i))[4][nuc] += 1
+    
+    return number_hits, ref_dik, length
 
 def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_hits, query, seq_types):
 
@@ -608,62 +628,65 @@ def plot_vars(args, seq_type = 'aa'):
 
 def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent'):
 	
-	'''
-	Parses blast output. How to do this cleaner? a Class? At least its in one place
-	'''
-	query_seqs = get_query_seqs(args)
-	query_seqs = list(query_seqs.keys())#list for fixed order
-	omit, _ = rejects(args)
+    '''
+    Parses blast output. How to do this cleaner? a Class? At least its in one place
+    '''
+    query_seqs = get_query_seqs(args)
+    query_seqs = list(query_seqs.keys())#list for fixed order
+    omit, _ = rejects(args)
+    percent_length = float(args.percent_length)
+    percent_identity = float(args.percent_identity) # Blast regularly calls 99% where its def 100% by direct str
+    #query as key
+    if dict_key == 'query' and dict_value == 'percent':
+        tmp = collections.defaultdict(lambda: collections.defaultdict(list)) # need tmp to get max hit v db seq
+        hits_dict = collections.defaultdict(list)
+        with open('blast_out.txt', 'r') as fin:
+            for line in fin:
+                query, hit, percent = line.strip().split()[:3]
+                if hit not in omit.get(query, 'NA'):
+                    if float(percent) >= percent_identity:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        tmp[query][ass].append(float(percent))
+        for query in tmp:
+            for ass in tmp.get(query):
+                biggest_hit = max(tmp[query][ass])
+                assert biggest_hit >= percent_identity
+                hits_dict[query].append(biggest_hit)
+    #ass as key
+    elif dict_key == 'assembly' and dict_value == 'query': #for csv
+        hits_dict = collections.defaultdict(lambda: collections.defaultdict(list))
+        with open('blast_out.txt', 'r') as fin:
+            for line in fin: 
+                query, hit, percent = line.strip().split()[:3]
+                length = float(line.strip().split()[-1])
+                percent = float(percent)
+                if hit not in omit.get(query, 'NA'):
+                    if percent >= percent_identity and length >= percent_length:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        tup = (length, percent)
+                        hits_dict[ass][query].append(tup)
+    #heatmap itol
+    elif dict_key == 'assembly' and dict_value == 'percent':
+        hits_dict = {}
+        #fill dict with 0.0
+        for ass in assemblies:
+            hits_dict[ass] = [str(0.0) for query in query_seqs]
+        #Positionally replace 0.0 where there's hits
+        with open('blast_out.txt', 'r') as fin:
+            for line in fin:
+                query, hit, percent = line.strip().split()[:3]
+                if hit not in omit.get(query, 'NA'):
+                    if float(percent) >= percent_identity:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        index = query_seqs.index(query)
+                        if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
+                            hits_dict[ass][index] = percent#itol heatmap
+    else:
+        print ("Can't parse Blast")
+            
+    return hits_dict, query_seqs	
 
-	percent_identity = float(args.percent_identity) - 1.0 # Blast regularly calls 99% where its def 100% by direct str
-	#query as key
-	if dict_key == 'query' and dict_value == 'percent':
-		tmp = collections.defaultdict(lambda: collections.defaultdict(list)) # need tmp to get max hit v db seq
-		hits_dict = collections.defaultdict(list)
-		with open('blast_out.txt', 'r') as fin:
-			for line in fin:
-				query, hit, percent = line.strip().split()[:3]
-				if hit not in omit.get(query, 'NA'):
-					if float(percent) >= percent_identity:
-						ass = '_'.join(hit.split('_')[:-1])
-						tmp[query][ass].append(float(percent))
-		for query in tmp:
-			for ass in tmp.get(query):
-				biggest_hit = max(tmp[query][ass])
-				assert biggest_hit >= percent_identity
-				hits_dict[query].append(biggest_hit)
-	#ass as key
-	elif dict_key == 'assembly' and dict_value == 'query': #for csv
-		hits_dict = collections.defaultdict(lambda: collections.defaultdict(list))
-		with open('blast_out.txt', 'r') as fin:
-			for line in fin: 
-				query, hit, percent = line.strip().split()[:3]
-				if hit not in omit.get(query, 'NA'):
-					if float(percent) >= percent_identity:
-						ass = '_'.join(hit.split('_')[:-1])
-						hits_dict[ass][query].append(percent)
-	#heatmap itol
-	elif dict_key == 'assembly' and dict_value == 'percent':
-		hits_dict = {}
-		#fill dict with 0.0
-		for ass in assemblies:
-			hits_dict[ass] = [str(0.0) for query in query_seqs]
-		#Positionally replace 0.0 where there's hits
-		with open('blast_out.txt', 'r') as fin:
-			for line in fin:
-				query, hit, percent = line.strip().split()[:3]
-				if hit not in omit.get(query, 'NA'):
-					if float(percent) >= percent_identity:
-						ass = '_'.join(hit.split('_')[:-1])
-						index = query_seqs.index(query)
-						if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
-							hits_dict[ass][index] = percent#itol heatmap
-	else:
-		print ("Can't parse Blast")
-		
-	return hits_dict, query_seqs	
-
-def box(args, assemblies):
+def box(args, assemblies, blast_type):
 
     '''
     Plot variation (box) and carriage (bar) on separate axis, save as svg 
@@ -678,9 +701,12 @@ def box(args, assemblies):
         if args.operon:
             for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
                   remaining_seqs = i #not i + 1 cuz ref in there
+            if blast_type == 'tblastn':
+                remaining_seqs += 1 #no ref
         else:
             for i, record in enumerate(SeqIO.parse(query + '_aa_seqs.aln', 'fasta')):
                 remaining_seqs = i #not i + 1 cuz ref in there
+            
         labels[query] = remaining_seqs
         if query not in percent_dict:
             percent_dict[query] = [0.0]
