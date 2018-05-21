@@ -765,12 +765,9 @@ def DNDS(args):
                     #trim to be divisable by 3
                     min_len = min([len(str(ref.seq)), len(str(record.seq))])
                     while min_len%3!=0:
-                        print (min_len)
                         min_len -= 1
-
                     seq1 = SeqRecord(Seq(str(ref.seq)[:min_len], alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro1')
                     seq2 = SeqRecord(Seq(str(record.seq)[:min_len], alphabet=IUPAC.IUPACUnambiguousDNA()), id='pro2')
-                     
                     #aln prot
                     tmp_aln = 'tmp.aln'
                     tmp_fa = 'tmp.fa'
@@ -781,27 +778,25 @@ def DNDS(args):
                             SeqIO.write(record_prot, fout, 'fasta')
                     cline = MuscleCommandline(input=tmp_fa,out=tmp_aln)
                     stdout1,stderr1 = cline()
-
                     #add prot
                     for i, aa_record in enumerate(SeqIO.parse('tmp.aln','fasta')):
                         if aa_record.id == ref.id:
                             pro1 = SeqRecord(Seq(str(aa_record.seq), alphabet=IUPAC.protein),id='pro1')
                         else:
                             pro2 = SeqRecord(Seq(str(aa_record.seq), alphabet=IUPAC.protein),id='pro2')
-
                     #make aln object
                     aln = MultipleSeqAlignment([pro1, pro2])
                     codon_aln = codonalign.build(aln, [seq1, seq2])
-
                     #get dnds
-                    dN, dS = cal_dn_ds(codon_aln[0], codon_aln[1], method='NG86')  
-                    try: dNdS = dN/dS
-                    except: dNdS = 0.0    
+                    try:
+                        dN, dS = cal_dn_ds(codon_aln[0], codon_aln[1], method='NG86')  
+                        try: dNdS = dN/dS
+                        except: dNdS = np.nan
+                    except: dNdS = np.nan
                     d[gene][ref.id][record.id] = dNdS
-
         except:
-            print ('DNDS failed for', gene)
-            print (dnds_in ,os.path.exits(dnds_in))
+            print ('DNDS failed for gene:', gene, 'between the seqs', ref.id, 'and', record.id, 'from ' + dnds_in)
+            #print (dnds_in ,os.path.exits(dnds_in))#hash seems to break this 
     with open('dNdS_median_all_samples.csv','w') as fout:
         for gene in d:
             df = pd.DataFrame.from_dict(d.get(gene), orient='index')
