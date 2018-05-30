@@ -714,14 +714,13 @@ def box(args, assemblies, blast_type):
     keys = list(labels.copy().keys())#future proof incase very multi thread it
     #- https://blog.labix.org/2008/06/27/watch-out-for-listdictkeys-in-python-3
     for box_number, query_seq_names in enumerate([keys[i:i + 12] for i in range(0, len(keys), 12)]):
-        variation_box = [[float(no) for no in percent_dict.get(query)] for query in percent_dict if query in query_seq_names]
+        variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
         carriage_bar = []
-        for query in percent_dict:
-            if query in query_seq_names:
-                if percent_dict.get(query) == [0.0]:
-                     carriage_bar.append(0.0)
-                else:
-                    carriage_bar.append(100.0*(len(percent_dict.get(query))/float(number_of_assemblies)))
+        for query in query_seq_names:
+            if percent_dict.get(query) == [0.0]:
+                carriage_bar.append(0.0)
+            else:
+                carriage_bar.append(100.0*(len(percent_dict.get(query))/float(number_of_assemblies)))
         #plot
         plt.figure()
         fig, ax = plt.subplots()
