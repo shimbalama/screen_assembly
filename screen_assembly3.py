@@ -74,16 +74,17 @@ def main ():
     blast_type = blast(args)
     print ('Snipping sequences from db and checking for contigs breaks...')
     for i in range(0, len(query_seqs), int(args.threads)):
+        #Get fastas
         chunk = query_seqs[i:i + int(args.threads)]
         tmp = [(args, query) for query in chunk]
         p = multiprocessing.Pool(processes = int(args.threads))
         p.map(fasta, tmp)
         p.close()
+        #Look for contig breaks
         p = multiprocessing.Pool(processes = int(args.threads))
         p.map(boot_hits_at_contig_breaks, tmp)
         p.close()
-    for i in range(0, len(query_seqs), int(args.threads)):
-        chunk = query_seqs[i:i + int(args.threads)]
+        #Process seqs
         tmp = [(args, blast_type, query) for query in chunk]
         p = multiprocessing.Pool(processes = int(args.threads))
         p.map(process_seqs, tmp)
@@ -184,7 +185,7 @@ def csv(args, assemblies, binary = True):
             for ass in assemblies:
                 fout.write(ass +',')
                 for query in query_seqs:
-                    if query in hits_dict.get(ass, []):
+                    if query in hits_dict.get(ass, []) and not omit_dik[ass][query]:#for multiple hits 
                         if csv == 'binary_hits':
                             hits_per_query[query] += 1
                             fout.write('1,')
