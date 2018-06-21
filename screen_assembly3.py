@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import sys
-from ete3 import Tree, ClusterTree
+#from ete3 import Tree, ClusterTree
 import random
 import shutil
 sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules')#Set this specific to you
