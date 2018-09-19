@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import sys
-from ete3 import Tree, ClusterTree
 import random
 import shutil
 sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
@@ -25,6 +24,8 @@ from Bio.Alphabet import generic_dna
 from Bio.codonalign.codonseq import cal_dn_ds
 from Bio import codonalign
 import multiprocessing
+from multiprocessing import Pool, TimeoutError
+import matplotlib as mpl 
 
 def main ():
 
@@ -38,22 +39,39 @@ def main ():
     '''
     #Args
     parser = argparse.ArgumentParser(description='Screens assemblies for given gene/genes/proteins/operons.')
-    parser.add_argument("-q", "--query", type=str, help="Query sequences fasta.")
-    parser.add_argument("-t", "--threads", type=str, help="How many threads to give blast, muscle, raxml etc.", default = '4')
-    parser.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
-    parser.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
-    parser.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
-    parser.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-SSE3", default='raxmlHPC-PTHREADS-SSE3')
-    parser.add_argument("-d", "--dNdS", action='store_true', help="Calculate dNdS. Off by default.", default=False)
-    parser.add_argument("-a", "--aln", action='store_false', help="Make alignments with muscle. On by default.", default=True)
-    parser.add_argument("-x", "--plots", action='store_false', help="Make plots. On by default.", default=True)
-    parser.add_argument("-pi", "--percent_identity", type=str, help="Percent_identity. Default 80.", default='80')
-    parser.add_argument("-pl", "--percent_length", type=str, help="Percent_length. Default 80.", default='80')
-    parser.add_argument("-i", "--input_folder", type=str, help="Folder with ONLY db seqs in it. Can be one file or many. Must be the same sequence type.")
-    parser.add_argument('-o', "--operon", action='store_true', default=False, help='Seq is operon or kmer, something where stops are expected')
+    
+    required = parser.add_argument_group('Required', 'Need query fastas and a database to look in')
+    required.add_argument("-q", "--query", type=str, help="Query sequences fasta. Must only have one . in name. ie sample_1.fa, NOT sample.1.fa")
+    required.add_argument("-i", "--input_folder", type=str, help="Folder with ONLY db seqs in it. Can be one file or many. Must be the same sequence type.")
 
+    group = parser.add_argument_group('Options', 'Alignment required for SNP plots, this will increase run time')
+    group.add_argument("-t", "--threads", type=str, help="How many threads to give blast, muscle, raxml etc.", default = '4') 
+    group.add_argument("-d", "--dNdS", action='store_true', help="Calculate dNdS. Off by default.", default=False)
+    group.add_argument("-a", "--aln", action='store_false', help="Make alignments with muscle. On by default.", default=True)
+    group.add_argument("-x", "--plots", action='store_false', help="Make plots. On by default.", default=True)
+    group.add_argument("-p", "--percent_identity", type=str, help="Percent_identity. Default 80.", default='80')
+    group.add_argument("-l", "--percent_length", type=str, help="Percent_length. Default 80.", default='80')
+    group.add_argument('-o', "--operon", action='store_true', default=False, help='Seq is operon or kmer, something where stops are expected')
+
+    phy = parser.add_argument_group('Phylogeny', 'Can take a long time')
+    phy.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
+    phy.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
+    phy.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
+    phy.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-SSE3", default='raxmlHPC-PTHREADS-SSE3')
+
+    box_wisker = parser.add_argument_group('Required', 'Box and wisker plot')
+    box_wisker.add_argument("-c", "--label_rotation", type=int, help="Labels on box plot. Default 90.", default=90)
+    box_wisker.add_argument("-s", "--style", action='store_false', help="Box plot style. Default classic", default=True)
+    box_wisker.add_argument("-g", "--print_count", action='store_false', help="Overlay total count on percent carriage bars. Default True", default=True)
+    box_wisker.add_argument("-n", "--number_samples_on_box_plot", type=int, help="number_samples_on_box_plot. Default 10", default = 10)
+    box_wisker.add_argument("-k", "--keep_flagged", action='store_true', help="Include hits flagged with Ns, premature stops or contig breaks. Default off.", default=False)
+  
     args = parser.parse_args()
     print ('args',args)	
+    if args.style:
+        mpl.style.use('classic')
+        
+        
     #run
 
     #put stuff back if re-running
@@ -69,33 +87,30 @@ def main ():
 
     #start pipe    
     assemblies = cat(args)
-    print ('Working with ' +str(len(assemblies)) + ' assemblies') 
     print ('Starting Blast...')
     blast_type = blast(args)
     print ('Snipping sequences from db and checking for contigs breaks...')
-    for i in range(0, len(query_seqs), int(args.threads)):
         #Get fastas
-        chunk = query_seqs[i:i + int(args.threads)]
-        tmp = [(args, query) for query in chunk]
-        p = multiprocessing.Pool(processes = int(args.threads))
-        p.map(fasta, tmp)
-        p.close()
-        #Look for contig breaks
-        p = multiprocessing.Pool(processes = int(args.threads))
-        p.map(boot_hits_at_contig_breaks, tmp)
-        p.close()
+    with Pool(processes=int(args.threads)) as pool:
+        tmp = [(args, query) for query in query_seqs]
+        pool.map(fasta, tmp)
+        
+    with Pool(processes=int(args.threads)) as pool:
+        tmp = [(args, query) for query in query_seqs]
+        pool.map(boot_hits_at_contig_breaks, tmp)
         #Process seqs
-        tmp = [(args, blast_type, query) for query in chunk]
-        p = multiprocessing.Pool(processes = int(args.threads))
-        p.map(process_seqs, tmp)
-        p.close()
+    with Pool(processes=int(args.threads)) as pool:
+        tmp = [(args, blast_type, query) for query in query_seqs]
+        pool.map(process_seqs, tmp)
+        
     print ('Making an itol template...')
     itol(args, assemblies)
     print ('Making a CSV summary of results...')
     hits_per_query_dik2 = csv(args, assemblies)
+    box(args, assemblies, blast_type)
     if args.aln:
         print ('Making a Box plot')
-        hits_per_query_dik = box(args, assemblies, blast_type)
+        hits_per_query_dik = sanity_check(args, blast_type)
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
         except:
@@ -158,6 +173,7 @@ def versions(args):
     '''
 
     with open('versions.txt', 'w') as fout:
+        fout.write(str(args)+'\n')
         call(['blastn', '-version'], stdout=fout)
         if args.aln:
             call(['muscle', '-version'], stdout=fout)
@@ -327,17 +343,19 @@ def gap_plot(args, query, seq_type):
             plt.savefig(query +'_gaps.svg')
             plt.close()
 
-def muscle(args, query, seq_type):
+def clustal(args, query, seq_type):
 	
-    print ('muscle call', query, seq_type)
+    print ('Clustal Omega call', query, seq_type)
     if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
-        call(['muscle', '-quiet',
-            '-in', query + '_non_redundant.fasta',
-            '-out', query + '_' + seq_type + '_non_redundan_seqs.aln'])
+        call(['clustalo',
+            '-i', query + '_non_redundant.fasta',
+            '-o', query + '_' + seq_type + '_non_redundan_seqs.aln',
+            '--threads', '1'])#seems faster than just giving clustal muli threads
     if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):	
-        call(['muscle', '-quiet',
-            '-in', query + '_seqs_and_ref_' + seq_type + '.fasta',
-            '-out', query + '_' + seq_type + '_seqs.aln'])
+        call(['clustalo',
+            '-i', query + '_seqs_and_ref_' + seq_type + '.fasta',
+            '-o', query + '_' + seq_type + '_seqs.aln',
+            '--threads', '1'])
     #broken
     #if seq_type == 'aa':
     #    print ('Start gap plot', query)
@@ -392,7 +410,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
         fout2.close()
         make_fasta_non_redundant(args, query, seq_type)
     if args.aln:
-        muscle(args, query, seq_type)
+        clustal(args, query, seq_type)
 
 	
 def process_seqs(tup):
@@ -411,7 +429,7 @@ def process_seqs(tup):
                 fout.write(line)
         fout.close()
         make_fasta_non_redundant(args, query, 'aa')
-        muscle(args, query, 'aa')
+        clustal(args, query, 'aa')
     #elif blast_type == 'tblastn':
     #    seq_type = 'aa'
     #    translated(args, query_seqs, query, seq_type, blast_type)	
@@ -448,7 +466,6 @@ def variant_types(args, assemblies):
 					if sample =='ref':
 						variants_dik['Ref'][query] = '0'
 					else:
-						ass = '_'.join(sample.split('_')[:-1])
 						variants_dik[ass][query] = '0'
 			else:
 				for sample in record.description.split(' ')[1].split(','):
@@ -679,13 +696,42 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
                 if hit not in omit.get(query, 'NA'):
                     if float(percent) >= percent_identity:
                         ass = '_'.join(hit.split('_')[:-1])
-                        index = query_seqs.index(query)
+                        try: 
+                            index = query_seqs.index(query)
+                        except: 
+                            print (query, 'not in', query_seqs)
+                            continue
                         if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
                             hits_dict[ass][index] = percent#itol heatmap
     else:
         print ("Can't parse Blast")
             
     return hits_dict, query_seqs	
+
+def sanity_check(args, blast_type):
+    
+    '''
+    Make sure everything lines up
+    '''
+
+    query_seqs = get_query_seqs(args)
+    query_seqs = list(query_seqs.keys())
+
+    labels = {}
+    
+    for query in query_seqs:
+        if args.operon:
+            for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
+                  remaining_seqs = i #not i + 1 cuz ref in there
+            if blast_type == 'tblastn':
+                remaining_seqs += 1 #no ref
+        else:
+            for i, record in enumerate(SeqIO.parse(query + '_aa_seqs.aln', 'fasta')):
+                remaining_seqs = i #not i + 1 cuz ref in there
+
+        labels[query] = remaining_seqs
+
+    return labels
 
 def box(args, assemblies, blast_type):
 
@@ -698,35 +744,37 @@ def box(args, assemblies, blast_type):
 
     #See how many are left
     labels = {}
+    df = pd.read_csv('total_hits.csv',index_col=0,dtype='str')
+    if '#Names' in df.columns:
+        df.columns = list(df.columns)[1:] +['na']
     for query in query_seqs:
-        if args.operon:
-            for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
-                  remaining_seqs = i #not i + 1 cuz ref in there
-            if blast_type == 'tblastn':
-                remaining_seqs += 1 #no ref
-        else:
-            for i, record in enumerate(SeqIO.parse(query + '_aa_seqs.aln', 'fasta')):
-                remaining_seqs = i #not i + 1 cuz ref in there
-            
-        labels[query] = remaining_seqs
+        labels[query] = list(df[query]).count('1')
         if query not in percent_dict:
             percent_dict[query] = [0.0]
+
     keys = list(labels.copy().keys())#future proof incase very multi thread it
     #- https://blog.labix.org/2008/06/27/watch-out-for-listdictkeys-in-python-3
-    for box_number, query_seq_names in enumerate([keys[i:i + 12] for i in range(0, len(keys), 12)]):
+    number_samples = args.number_samples_on_box_plot
+    for box_number, query_seq_names in enumerate([keys[i:i + number_samples] for i in range(0, len(keys), number_samples)]):
         variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
         carriage_bar = []
         for query in query_seq_names:
+            try: assert labels.get(query) == len(percent_dict.get(query)) #probably not needed but I like to double check
+            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
-                carriage_bar.append(100.0*(len(percent_dict.get(query))/float(number_of_assemblies)))
+                if args.keep_flagged:
+                    labels[query] = len(percent_dict.get(query)) #overwrite above
+                    carriage_bar.append(100.0*(len(percent_dict.get(query))/number_of_assemblies))
+                else:
+                    carriage_bar.append(100.0*(labels.get(query)/number_of_assemblies))
         #plot
         plt.figure()
         fig, ax = plt.subplots()
-        plt.boxplot(variation_box)
+        plt.boxplot(variation_box, patch_artist=True)
         plt.title('Blast screen of ' + str(number_of_assemblies) + ' seqs')
-        ax.set_xticklabels(query_seq_names,rotation=45)
+        ax.set_xticklabels(query_seq_names, rotation=args.label_rotation)#,rotation=45 maybe make this optional
         plt.ylabel('Percent variation (box & wisker)')
 
         ax2 = ax.twinx()
@@ -736,11 +784,14 @@ def box(args, assemblies, blast_type):
         ax2.set_alpha(0.1)
         ax.patch.set_facecolor('None')
         rects = ax2.patches
-        seq_counts = [str(labels.get(x)) for x in query_seq_names]
-        print ('seq_counts',seq_counts)
-        for rect, label in zip(rects, seq_counts):
-            height = rect.get_height()
-            ax2.text(rect.get_x() + rect.get_width()/2, height/2, label, ha='center', va='bottom')
+        
+        if args.print_count:
+            seq_counts = [str(labels.get(x)) for x in query_seq_names]
+            print ('seq_counts',seq_counts)
+            for rect, label in zip(rects, seq_counts):
+                height = rect.get_height()
+                ax2.text(rect.get_x() + rect.get_width()/2, height/2, label, ha='center', va='bottom', rotation=90)
+        
         ax2.set_ylim(ax.get_ylim())
         ax.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
         ax2.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
@@ -748,7 +799,6 @@ def box(args, assemblies, blast_type):
         plt.tight_layout()
         plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg", figsize=(22,22))
     print ('box labels',labels)
-    return labels
 
 def DNDS(args):
     
