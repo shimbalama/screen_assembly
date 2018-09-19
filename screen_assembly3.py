@@ -87,6 +87,8 @@ def main ():
 
     #start pipe    
     assemblies = cat(args)
+    try: assert '' not in assemblies
+    except: print ('issue with assembly name', list(sorted(assemblies)))
     print ('Starting Blast...')
     blast_type = blast(args)
     print ('Snipping sequences from db and checking for contigs breaks...')
@@ -694,15 +696,18 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
             for line in fin:
                 query, hit, percent = line.strip().split()[:3]
                 if hit not in omit.get(query, 'NA'):
-                    if float(percent) >= percent_identity:
-                        ass = '_'.join(hit.split('_')[:-1])
-                        try: 
-                            index = query_seqs.index(query)
-                        except: 
-                            print (query, 'not in', query_seqs)
-                            continue
-                        if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
-                            hits_dict[ass][index] = percent#itol heatmap
+                    if not 'pdb' in hit and not '|' in hit:
+                        if float(percent) >= percent_identity:
+                            ass = '_'.join(hit.split('_')[:-1])
+                            try: 
+                                index = query_seqs.index(query)
+                            except: 
+                                print (query, 'not in', query_seqs)
+                                continue
+                            if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
+                                hits_dict[ass][index] = percent#itol heatmap
+                    else:
+                        print('skipping hit', hit, 'blast has removed contig information')
     else:
         print ("Can't parse Blast")
             
@@ -749,6 +754,10 @@ def box(args, assemblies, blast_type):
         df.columns = list(df.columns)[1:] +['na']
     for query in query_seqs:
         labels[query] = list(df[query]).count('1')
+        labels[query] += list(df[query]).count('2')
+        labels[query] += list(df[query]).count('3')
+        labels[query] += list(df[query]).count('4')
+        labels[query] += list(df[query]).count('5')#should be enough, will come up below if not
         if query not in percent_dict:
             percent_dict[query] = [0.0]
 
@@ -759,8 +768,8 @@ def box(args, assemblies, blast_type):
         variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
         carriage_bar = []
         for query in query_seq_names:
-            try: assert labels.get(query) == len(percent_dict.get(query)) #probably not needed but I like to double check
-            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)))
+            try: assert labels.get(query) == len(percent_dict.get(query)) -1 #probably not needed but I like to double check
+            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query))-1, 'from csv', df[query], 'from blast', percent_dict.get(query))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
