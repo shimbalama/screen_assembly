@@ -38,7 +38,7 @@ Once screen_assembly3.py is in your PATH type screen_assembly3.py -h . If you ha
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the MIT License - see the LICENSE https://github.com/shimbalama/screen_assembly/blob/master/LICENSE file for details
 
 ## Acknowledgments
 
