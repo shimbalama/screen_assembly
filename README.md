@@ -20,7 +20,12 @@ RAXML and or IQtree
 
 ### Installing
 
-Download the script and place it in your PATH. Make sure its executable (chmod +x). Also download lab_modules.py from https://github.com/shimbalama/common_modules and set this line - sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules') - in screen_assembly3.py to point at the location of lab_modules.py .
+* Download the script and place it in your PATH: 
+  * git clone https://github.com/shimbalama/screen_assembly.git
+  * export PATH="your_path:$PATH"
+* Make sure its executable (chmod +x).
+* Download lab_modules.py git clone https://github.com/shimbalama/common_modules.git
+* Use a text editor to set this line in screen_assembly3.py to point at the dir you put lab_modules.py in:  sys.path.append('/Users/lmcintyre/Dropbox/work/uniMelb/code/github/common_modules') becomes sys.path.append('your_path/common_modules')
 
 ## Running the tests
 
