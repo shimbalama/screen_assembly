@@ -31,6 +31,9 @@ RAXML and or IQtree
 
 Once screen_assembly3.py is in your PATH type screen_assembly3.py -h . If you have all dependencies then the menu will display. Otherwise read the erorr and install whichever dependency is missing.
 
+## Running the program
+
+Please see the WIKI
 
 ## Authors
 
