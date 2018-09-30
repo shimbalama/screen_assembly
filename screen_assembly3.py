@@ -492,27 +492,39 @@ def variant_types(args, assemblies):
 
 def itol(args, assemblies):
 
-	'''
-	Makes an itol heatmap template 
-	'''
-	color_dict = {}
-	fout = open(args.query[:-3]+'_itol.txt','w')
-	#Group by percent similarity
-	percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
-	#Header			
-	fout.write('DATASET_HEATMAP\n')
-	fout.write('SEPARATOR SPACE\n')
-	fout.write('DATASET_LABEL ' + args.query[:-3] + '\n')
-	fout.write('COLOR #ff0000\n')
-	FIELD_LABELS = ' '.join(query_seqs)
-	fout.write('FIELD_LABELS ' + FIELD_LABELS + '\n')
-	fout.write('DATA\n')
-	for ass in percent_dict:
-		fout.write(ass+' ')
-		for query_percent in percent_dict.get(ass):
-			fout.write(str(query_percent) + ' ')
-		fout.write('\n')
-	fout.close()
+    '''
+    Makes an itol heatmap template 
+    '''
+    
+    name = args.query[:-3]+'_itol.txt'.replace('../','')
+    fout = open(name,'w')
+    #Group by percent similarity
+    percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
+    df = pd.DataFrame.from_dict(percent_dict, orient='index')
+    print (df)
+    df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
+    #Header			
+    print (df)
+    fout.write('DATASET_HEATMAP\n')
+    fout.write('SEPARATOR COMMA\n')
+    fout.write('DATASET_LABEL,' + args.query[:-3] + '\n')
+    fout.write('COLOR,#ff0000\n')
+    FIELD_LABELS = ','.join(query_seqs)
+    fout.write('FIELD_LABELS,' + FIELD_LABELS + '\n')
+    '''
+    fout.write('LEGEND_TITLE,Dataset_legend')
+    FIELD_LABELS = ','.join(['1' for i in range(len(query_seqs))])
+    fout.write('LEGEND_SHAPES,' + FIELD_LABELS + '\n')
+    FIELD_LABELS = ','.join(['#ff0000' for i in range(len(query_seqs))])
+    fout.write('LEGEND_COLORS,' + FIELD_LABELS + '\n')
+    LEGEND_LABELS = ','.join(query_seqs)
+    fout.write('LEGEND_LABELS,' + LEGEND_LABELS + '\n') 
+    '''
+    fout.write('DATA\n')
+    fout.close()
+    
+    with open(name, 'a') as fout:
+        df.to_csv(fout, header=False)
 
 def var_pos_csv(args, blast_type):
 
@@ -687,25 +699,22 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
                         hits_dict[ass][query].append(tup)
     #heatmap itol
     elif dict_key == 'assembly' and dict_value == 'percent':
-        hits_dict = {}
-        #fill dict with 0.0
-        for ass in assemblies:
-            hits_dict[ass] = [str(0.0) for query in query_seqs]
-        #Positionally replace 0.0 where there's hits
+        hits_dict = collections.defaultdict(lambda: collections.defaultdict(float))
+        for ass in assemblies:#prefil
+            for query in query_seqs:
+                hits_dict[ass][query] = 0.0
         with open('blast_out.txt', 'r') as fin:
             for line in fin:
                 query, hit, percent = line.strip().split()[:3]
+                percent = float(percent)
                 if hit not in omit.get(query, 'NA'):
                     if not 'pdb' in hit and not '|' in hit:
-                        if float(percent) >= percent_identity:
+                        if percent >= percent_identity:
                             ass = '_'.join(hit.split('_')[:-1])
-                            try: 
-                                index = query_seqs.index(query)
-                            except: 
-                                print (query, 'not in', query_seqs)
-                                continue
-                            if float(percent) > float(hits_dict[ass][index]):#if 2 + use largest
-                                hits_dict[ass][index] = percent#itol heatmap
+                            try: assert ass in assemblies
+                            except: print (ass, 'not in assemblies')
+                            if percent > hits_dict.get(ass).get(query):#if 2 + use largest
+                                hits_dict[ass][query] = percent#itol heatmap
                     else:
                         print('skipping hit', hit, 'blast has removed contig information')
     else:
@@ -768,8 +777,8 @@ def box(args, assemblies, blast_type):
         variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
         carriage_bar = []
         for query in query_seq_names:
-            try: assert labels.get(query) == len(percent_dict.get(query)) -1 #probably not needed but I like to double check
-            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query))-1, 'from csv', df[query], 'from blast', percent_dict.get(query))
+            try: assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
+            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)), 'from csv', df[query], 'from blast', percent_dict.get(query))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
