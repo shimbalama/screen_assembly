@@ -13,7 +13,7 @@ import numpy as np
 import sys
 import random
 import shutil
-sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you
+sys.path.append('../common_modules')#Set this specific to you 
 from lab_modules import *
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
@@ -548,10 +548,8 @@ def itol(args, assemblies):
     #Group by percent similarity
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
     df = pd.DataFrame.from_dict(percent_dict, orient='index')
-    print (df)
     df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
     #Header			
-    print (df)
     fout.write('DATASET_HEATMAP\n')
     fout.write('SEPARATOR COMMA\n')
     fout.write('DATASET_LABEL,' + args.query[:-3] + '\n')
