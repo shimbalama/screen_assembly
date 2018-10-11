@@ -26,6 +26,7 @@ from Bio import codonalign
 import multiprocessing
 from multiprocessing import Pool, TimeoutError
 import matplotlib as mpl 
+import itertools
 
 def main ():
 
@@ -52,7 +53,8 @@ def main ():
     group.add_argument("-p", "--percent_identity", type=str, help="Percent_identity. Default 80.", default='80')
     group.add_argument("-l", "--percent_length", type=str, help="Percent_length. Default 80.", default='80')
     group.add_argument('-o', "--operon", action='store_true', default=False, help='Seq is operon or kmer, something where stops are expected')
-
+    group.add_argument("-k", "--keep_flagged", action='store_true', help="Include hits flagged with Ns, premature stops or contig breaks. Default off.", default=False)
+   
     phy = parser.add_argument_group('Phylogeny', 'Can take a long time')
     phy.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
     phy.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
@@ -64,7 +66,6 @@ def main ():
     box_wisker.add_argument("-s", "--style", action='store_false', help="Box plot style. Default classic", default=True)
     box_wisker.add_argument("-g", "--print_count", action='store_false', help="Overlay total count on percent carriage bars. Default True", default=True)
     box_wisker.add_argument("-n", "--number_samples_on_box_plot", type=int, help="number_samples_on_box_plot. Default 10", default = 10)
-    box_wisker.add_argument("-k", "--keep_flagged", action='store_true', help="Include hits flagged with Ns, premature stops or contig breaks. Default off.", default=False)
   
     args = parser.parse_args()
     print ('args',args)	
@@ -186,6 +187,27 @@ def versions(args):
         if args.raxml:
             call([args.raxml_executable, '-v'], stdout=fout)
 
+def helper(csv, hits_per_query, query, fout, hits_dict, ass, omited = []):
+
+    if csv == 'binary_hits':
+        hits_per_query[query] += 1
+        fout.write('1,')
+    if csv == 'total_hits':
+        fout.write(str(len(hits_dict.get(ass).get(query)))+',')
+    if csv == 'length_and_sequence_identity':
+        max_tup = 0
+        biggest_tup = ()
+        for tup in hits_dict.get(ass).get(query):
+            length, percent, coords = tup    
+            if coords not in omited:
+                if sum([length, percent]) > max_tup:
+                    max_tup = sum([length, percent])
+                    biggest_tup = tup
+        length, percent, coords = biggest_tup
+        fout.write('percent_length='+str(length)+' percent_identity='+str(percent)+',')
+
+    return hits_per_query
+
 def csv(args, assemblies, binary = True):
     
     '''
@@ -193,8 +215,8 @@ def csv(args, assemblies, binary = True):
     '''
     
     print ('Making csv ...')
-    _, omit_dik = rejects(args)
-
+    omit_set, omit_dik = rejects(args)#todo make this work with specific multi hits
+    print ('gggggggg',omit_set, omit_dik)
     hits_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'query')
     for csv in ['binary_hits', 'total_hits', 'length_and_sequence_identity']:
         with open(csv + '.csv', 'w') as fout:
@@ -207,26 +229,38 @@ def csv(args, assemblies, binary = True):
             for ass in assemblies:
                 fout.write(ass +',')
                 for query in query_seqs:
-                    if query in hits_dict.get(ass, []) and not omit_dik[ass][query]:#for multiple hits 
-                        if csv == 'binary_hits':
-                            hits_per_query[query] += 1
-                            fout.write('1,')
-                        if csv == 'total_hits':
-                            fout.write(str(len(hits_dict.get(ass).get(query)))+',')
-                        if csv == 'length_and_sequence_identity':
-                            max_tup = 0
-                            biggest_tup = ()
-                            for tup in hits_dict.get(ass).get(query):
-                                if sum(tup) > max_tup:
-                                    max_tup = sum(tup)
-                                    biggest_tup = tup
-                            length, percent = biggest_tup
-                            fout.write('percent_length='+str(length)+' percent_identity='+str(percent)+',')
+                    if query in hits_dict.get(ass, []):
+                        if args.keep_flagged:#don't omit flagged
+                            print ('keeping all hits')
+                            hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass)
+                        else:#omit flagged, use other hits if there are any
+                            number_of_hits = len(hits_dict.get(ass).get(query))
+                            print (ass, query, number_of_hits)
+                            if number_of_hits == 1:
+                                length, percent, coords = hits_dict.get(ass).get(query)[0]
+                                if coords in omit_set:
+                                    print('omit', coords)
+                                    fout.write('-'.join(list(itertools.chain.from_iterable([omit_dik[ass][query][coord] for coord in omit_dik[ass][query]]))) + ',')
+                                else:
+                                    print('dont ommit', coords)
+                                    hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass)
+                            else:
+                                omited = []
+                                not_omited = []
+                                for tup in hits_dict.get(ass).get(query):
+                                    length, percent, coords = tup
+                                    if coords in omit_set:
+                                        omited.append(coords)
+                                    else:
+                                        not_omited.append(coords)
+                                print ('multi hit!!!', 'omited',omited,'not',not_omited)
+                                if not_omited:#use the best one that passed qc
+                                    hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass, omited)
+                                else:#report all reasons for failing qc
+                                    fout.write('-'.join(list(itertools.chain.from_iterable([omit_dik[ass][query][coord] for coord in omit_dik[ass][query]]))) + ',')
+                                        
                     else:
-                        if omit_dik[ass][query]:
-                            fout.write(omit_dik[ass][query][0] + ',')
-                        else:
-                            fout.write('0,')
+                        fout.write('0,')
                 fout.write('\n')
     fout.close()
     
@@ -235,16 +269,14 @@ def csv(args, assemblies, binary = True):
 
 def boot_functionality(args, fout, fout2, direction, contig, query, query_seqs, record):
 
-	last_pos = len(query) + contig.index(query)
-	if last_pos in range(len(contig)-1, len(contig)+1):#lil wriggle room...
-		fout2.write('>' + record.id + ' ' + direction +' strand end of contig\n')
-		fout2.write(query + '\n')
-	elif contig.index(query) in [0,1]:
-		fout2.write('>' + record.id + ' ' + direction +' strand start of contig\n')
-		fout2.write(query + '\n')
-	else:
-		record_query = query_seqs.get(record.id)
-		SeqIO.write(record_query, fout,'fasta')
+    last_pos = len(query) + contig.index(query)
+    record_query = query_seqs.get(record.id)
+    if last_pos in range(len(contig)-1, len(contig)+1):#lil wriggle room...
+        SeqIO.write(record_query, fout2,'fasta')
+    elif contig.index(query) in [0,1]:
+        SeqIO.write(record_query, fout2,'fasta')
+    else:
+        SeqIO.write(record_query, fout,'fasta')
 
 
 def boot_hits_at_contig_breaks(tup):
@@ -282,6 +314,7 @@ def boot_hits_at_contig_breaks(tup):
                     assert found
             fout.close()
             fout2.close()
+
 
 
 def make_fasta_non_redundant(args, query, seq_type):
@@ -369,6 +402,7 @@ def clustal(args, query, seq_type):
     #    print ('Finishd gap plot', query)
     #print ('Finishd aln and gap plot', query)
 
+   
 def translated(args, query_seqs, query, seq_type, blast_type):
     
     '''
@@ -380,17 +414,6 @@ def translated(args, query_seqs, query, seq_type, blast_type):
         fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
     catch_multiple_hits = defaultdict(list)
     for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
-        ass = '_'.join(record.id.split('_')[:-1])
-        catch_multiple_hits[ass].append(record)
-    for ass in catch_multiple_hits:
-        #use longest (this might mean a low quality one if pl and pi are very low)
-        record_len = 0
-        if len(catch_multiple_hits.get(ass)) > 1:
-            print ('Sample ' + ass + ' has ' + str(len(catch_multiple_hits.get(ass))) +' hits for query ' + query)
-        for var in catch_multiple_hits.get(ass):
-            if len(str(var.seq)) > record_len:
-                record_len = len(str(var.seq))
-                record = var
         seq = str(record.seq).upper()
         if seq_type == 'nuc':
             if 'N' in seq:
@@ -412,12 +435,34 @@ def translated(args, query_seqs, query, seq_type, blast_type):
                     SeqIO.write(record,fout,'fasta')
     fout.close()
     foutN.close()
-    if seq_type =='aa':
+    if seq_type == 'aa':
         fout2.close()
+ 
+def multi(args, query_seqs, query, seq_type, blast_type):
+
+    catch_multiple_hits = defaultdict(list)
+
+    qc = QC_fails(args, query)
+    for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
+        if record.id+':'+record.description not in qc:   
+            ass = '_'.join(record.id.split('_')[:-1])
+            catch_multiple_hits[ass].append(record)
+
+    for ass in catch_multiple_hits:
+        #use longest (this might mean a low quality one if pl and pi are very low)
+        record_len = 0
+        if len(catch_multiple_hits.get(ass)) > 1:
+            print ('Sample ' + ass + ' has multiple hits for query ' + query)
+        for var in catch_multiple_hits.get(ass):
+            if len(str(var.seq)) > record_len:
+                record_len = len(str(var.seq))
+                record = var
+    
+    if seq_type =='aa':
         make_fasta_non_redundant(args, query, seq_type)
     if args.aln:
         clustal(args, query, seq_type)
-
+    
 	
 def process_seqs(tup):
 
@@ -440,11 +485,13 @@ def process_seqs(tup):
     #    seq_type = 'aa'
     #    translated(args, query_seqs, query, seq_type, blast_type)	
     else:
-        for seq_type in ['nuc','aa']:
+        for seq_type in ['aa','nuc']:#aa first so have info re frame shifts
             if args.operon and seq_type == 'aa' and blast_type == 'blastp':
                 continue
             translated(args, query_seqs, query, seq_type, blast_type)
-
+        for seq_type in ['aa','nuc']:
+            multi(args, query_seqs, query, seq_type, blast_type)
+            
 
 def gene_tree(args, directory = 'muscle_and_raxml'):
 
@@ -668,20 +715,25 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
     '''
     query_seqs = get_query_seqs(args)
     query_seqs = list(query_seqs.keys())#list for fixed order
-    omit, _ = rejects(args)
+ 
     percent_length = float(args.percent_length)
     percent_identity = float(args.percent_identity) # Blast regularly calls 99% where its def 100% by direct str
+    
+    qc, _ = rejects(args)
     #query as key
-    if dict_key == 'query' and dict_value == 'percent':
+    if dict_key == 'query' and dict_value == 'percent':#for box n wisker
         tmp = collections.defaultdict(lambda: collections.defaultdict(list)) # need tmp to get max hit v db seq
         hits_dict = collections.defaultdict(list)
         with open('blast_out.txt', 'r') as fin:
             for line in fin:
-                query, hit, percent = line.strip().split()[:3]
-                if hit not in omit.get(query, 'NA'):
-                    if float(percent) >= percent_identity:
-                        ass = '_'.join(hit.split('_')[:-1])
-                        tmp[query][ass].append(float(percent))
+                bits = line.strip().split()
+                query, hit, percent = bits[:3]
+                if not args.keep_flagged:
+                    if hit+':'+bits[8]+'-'+bits[9] in qc:
+                        continue
+                if float(percent) >= percent_identity:
+                    ass = '_'.join(hit.split('_')[:-1])
+                    tmp[query][ass].append(float(percent))
         for query in tmp:
             for ass in tmp.get(query):
                 biggest_hit = max(tmp[query][ass])
@@ -692,14 +744,14 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
         hits_dict = collections.defaultdict(lambda: collections.defaultdict(list))
         with open('blast_out.txt', 'r') as fin:
             for line in fin: 
-                query, hit, percent = line.strip().split()[:3]
+                bits=line.strip().split()
+                query, hit, percent = bits[:3]
                 length = float(line.strip().split()[-1])
                 percent = float(percent)
-                if hit not in omit.get(query, 'NA'):
-                    if percent >= percent_identity and length >= percent_length:
-                        ass = '_'.join(hit.split('_')[:-1])
-                        tup = (length, percent)
-                        hits_dict[ass][query].append(tup)
+                if percent >= percent_identity and length >= percent_length:
+                    ass = '_'.join(hit.split('_')[:-1])
+                    tup = length, percent, hit+':'+bits[8]+'-'+bits[9]
+                    hits_dict[ass][query].append(tup)
     #heatmap itol
     elif dict_key == 'assembly' and dict_value == 'percent':
         hits_dict = collections.defaultdict(lambda: collections.defaultdict(float))
@@ -708,18 +760,21 @@ def parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
                 hits_dict[ass][query] = 0.0
         with open('blast_out.txt', 'r') as fin:
             for line in fin:
-                query, hit, percent = line.strip().split()[:3]
+                bits = line.strip().split()
+                query, hit, percent = bits[:3]
                 percent = float(percent)
-                if hit not in omit.get(query, 'NA'):
-                    if not 'pdb' in hit and not '|' in hit:
-                        if percent >= percent_identity:
-                            ass = '_'.join(hit.split('_')[:-1])
-                            try: assert ass in assemblies
-                            except: print (ass, 'not in assemblies')
-                            if percent > hits_dict.get(ass).get(query):#if 2 + use largest
-                                hits_dict[ass][query] = percent#itol heatmap
-                    else:
-                        print('skipping hit', hit, 'blast has removed contig information')
+                if not args.keep_flagged:
+                    if hit+':'+bits[8]+'-'+bits[9] in qc:
+                        continue
+                if not 'pdb' in hit and not '|' in hit:
+                    if percent >= percent_identity:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        try: assert ass in assemblies
+                        except: print (ass, 'not in assemblies')
+                        if percent > hits_dict.get(ass).get(query):#if 2 + use largest
+                            hits_dict[ass][query] = percent#itol heatmap
+                else:
+                    print('skipping hit', hit, 'blast has removed contig information')
     else:
         print ("Can't parse Blast")
             
@@ -781,7 +836,7 @@ def box(args, assemblies, blast_type):
         carriage_bar = []
         for query in query_seq_names:
             try: assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
-            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)), 'from csv', df[query], 'from blast', percent_dict.get(query))
+            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
@@ -879,8 +934,10 @@ def reg(name, reject_set, reject_dik, query, reason):
     if os.path.exists(name):
         for record in SeqIO.parse(name,'fasta'):
             ass = '_'.join(record.id.split('_')[:-1])
-            reject_dik[ass][query].append(reason)
-            reject_set[query].add(record.id)
+            coords = record.description.replace(record.id,'').strip()
+            exact_hit = record.id+':'+coords
+            reject_dik[ass][query][exact_hit].append(reason)
+            reject_set.add(exact_hit)
     return reject_set, reject_dik
 
 def rejects(args):
@@ -888,8 +945,8 @@ def rejects(args):
     '''
     Get info pertiaing to seqs removed due to hitting a contig break or have multiple stops in aa seq
     '''
-    reject_set = collections.defaultdict(set)
-    reject_dik = collections.defaultdict(lambda: collections.defaultdict(list))
+    reject_set = set([])
+    reject_dik = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))#specific to multiple hits
     query_seqs = get_query_seqs(args)
     for query in query_seqs:
         reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
@@ -900,6 +957,26 @@ def rejects(args):
             reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
     
     return reject_set, reject_dik
+
+def QC_fails(args, query):
+
+    qc = set([])
+    for fasta in [query + '_seqs_and_ref_nuc_Ns.fasta',
+                 query + '_seqs_and_ref_aa_Ns.fasta',
+                 query + '_nuc_seqs_excluded_due_to_contig_break.fasta']:
+        for record in SeqIO.parse(fasta, 'fasta'):
+            coords = record.description.replace(record.id,'').strip()
+            exact_hit = record.id+':'+coords
+            qc.add(exact_hit)
+            
+    if not args.operon:
+        assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+        for record in SeqIO.parse(query + '_seqs_and_ref_aa_multiple_stops.fasta', 'fasta'):
+            coords = record.description.replace(record.id,'').strip()
+            exact_hit = record.id+':'+coords
+            qc.add(exact_hit)
+                 
+    return qc
 
 if __name__ == "__main__":
     main()
