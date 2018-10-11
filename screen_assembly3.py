@@ -116,9 +116,13 @@ def main ():
         try:
             assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
         except:
-            print ('Hits per csv dont match hits in the box plot!')
-            print ('from box plot (which is from query_aa_seqs.aln)',hits_per_query_dik)
-            print ('from csv binary hits (from blast)', hits_per_query_dik2)
+            print ('Hits per csv dont match hits in the aln!')
+            print ('from aln (which is from query_aa_seqs.aln)',hits_per_query_dik)
+            print ('from csv binary hits (from csv)', hits_per_query_dik2)
+            for query in hits_per_query_dik:
+                if hits_per_query_dik.get(query) != hits_per_query_dik2.get(query):
+                    print ('Specifically', query, 'has', hits_per_query_dik.get(query), 'in the aln and',
+                        hits_per_query_dik2.get(query), 'in the csv')
             sys.exit(0)
         if args.plots:
             print ('Plotting...')
@@ -454,39 +458,40 @@ def gene_tree(args, directory = 'muscle_and_raxml'):
 
 def variant_types(args, assemblies):
 
-	'''
-	makes csv and itol of different seq variants
-	'''
-	print ('writing variant types csv')
-	query_seqs = get_query_seqs(args)
-	query_seqs = list(query_seqs)#order
-	variants_dik = collections.defaultdict(dict)
-	for query in query_seqs:
-		for i, record in enumerate(SeqIO.parse(query + '_non_redundant.fasta', 'fasta')):
-			if record.id == '0': #skip record.id, or ref twice
-				for sample in record.description.split(' ')[1].split(','):
-					if sample =='ref':
-						variants_dik['Ref'][query] = '0'
-					else:
-						variants_dik[ass][query] = '0'
-			else:
-				for sample in record.description.split(' ')[1].split(','):
-					ass = '_'.join(sample.split('_')[:-1])
-					variants_dik[ass][query] = str(i + 1)
-				
-	fout = open('sequence_variants.csv', 'w')
-	header = 'Sample,'+','.join(query_seqs)
-	fout.write(header + '\n')
-	for sample in assemblies:
-		tw = []
-		for query in query_seqs:
-			if variants_dik[sample]:
-				tw.append(variants_dik.get(sample, 'NA').get(query, 'NA'))
-			else:
-				tw.append('NA')
-		tw = sample + ',' + ','.join(tw)
-		fout.write(tw+'\n')
-	fout.close()
+    '''
+    makes csv and itol of different seq variants
+    '''
+    print ('writing variant types csv')
+    query_seqs = get_query_seqs(args)
+    query_seqs = list(query_seqs)#order
+    variants_dik = collections.defaultdict(dict)
+    for query in query_seqs:
+        for i, record in enumerate(SeqIO.parse(query + '_non_redundant.fasta', 'fasta')):
+            if record.id == '0': #skip record.id, or ref twice
+                for sample in record.description.split(' ')[1].split(','):
+                    if sample =='ref':
+                        variants_dik['Ref'][query] = '0'
+                    else:
+                        ass = '_'.join(sample.split('_')[:-1])
+                        variants_dik[ass][query] = '0'
+            else:
+                for sample in record.description.split(' ')[1].split(','):
+                    ass = '_'.join(sample.split('_')[:-1])
+                    variants_dik[ass][query] = str(i + 1)
+                            
+    fout = open('sequence_variants.csv', 'w')
+    header = 'Sample,'+','.join(query_seqs)
+    fout.write(header + '\n')
+    for sample in assemblies:
+        tw = []
+        for query in query_seqs:
+            if variants_dik[sample]:
+                tw.append(variants_dik.get(sample, 'NA').get(query, 'NA'))
+            else:
+                tw.append('NA')
+        tw = sample + ',' + ','.join(tw)
+        fout.write(tw+'\n')
+    fout.close()
 
 
 
