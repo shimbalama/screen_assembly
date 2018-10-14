@@ -127,7 +127,7 @@ def main ():
                 if blast_type != 'tblastn':#no ref in nuc
                     plot_vars(args, 'nuc')
             else:
-                #variant_types(args, assemblies) broken 
+                variant_types(args, assemblies) 
                 plot_vars(args)   
             var_pos_csv(args, blast_type)
     if args.raxml:
@@ -146,8 +146,8 @@ def main ():
                 shutil.move(query_output, query + '/' + query_output)
             except:
                 pass#lazy dir into itself handle
-    for log in glob('*RAxML_*'):
-        shutil.move(log, 'logs/'+log)
+    for tmp in glob('*tmp*'):
+        os.remove(tmp)
     versions(args)
     boil_down(args)
     print ('Done!')
@@ -286,40 +286,37 @@ def boot_hits_at_contig_breaks(tup):
     args, query = tup
     cat = args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'
     seq_type_db = get_seq_type(cat)
-    if seq_type_db != 'prot':
+    if seq_type_db == 'prot' or args.keep_flagged:
+        shutil.copy(query + '_all_nuc_seqs.fasta',query + '_seqs_without_contig_break.fasta')
+    else:
         seqs = collections.defaultdict(list)
         if not os.path.exists(query + '_seqs_without_contig_break.fasta'): #don't redo if already done when re-running
-            if args.keep_flagged:
-                shutil.copy(query + '_all_nuc_seqs.fasta',query + '_seqs_without_contig_break')    
-            else:
-                for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
-                    if ':' in record.id:#sometimes randomly adds coordinates? wtf
-                        id_, pos = record.id.strip().split(':')
-                        record.id = id_
-                        record.decription = pos
-                    seqs[record.id].append(record)
-                fout = open(query + '_seqs_without_contig_break.fasta','w')#Don't touch contig break
-                fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
-                for record in SeqIO.parse(cat,'fasta'):
-                    if record.id in seqs:
-                        for hit in seqs.get(record.id):
-                            coords = hit.description.replace(record.id,'').strip()
-                            exact_hit = hit.id+':'+coords
-                            found = False
-                            tmp = str(hit.seq).upper()
-                            contig = str(record.seq).upper()#contig
-                            if hit.id == 'MGAS10750_M4_0':
-                                print ('gggggggggggg',query, record.id, exact_hit)
-                            if tmp in contig:
-                                boot_functionality(args, fout, fout2,  contig, tmp, seqs, hit)
-                                found = True
-                            else:
-                                tmp = str(hit.seq.reverse_complement()).upper()
-                                boot_functionality(args, fout, fout2, contig, tmp, seqs, hit)
-                                found = True
-                            assert found
-                fout.close()
-                fout2.close()
+            for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
+                if ':' in record.id:#sometimes randomly adds coordinates? wtf
+                    id_, pos = record.id.strip().split(':')
+                    record.id = id_
+                    record.decription = pos
+                seqs[record.id].append(record)
+            fout = open(query + '_seqs_without_contig_break.fasta','w')#Don't touch contig break
+            fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
+            for record in SeqIO.parse(cat,'fasta'):
+                if record.id in seqs:
+                    for hit in seqs.get(record.id):
+                        coords = hit.description.replace(record.id,'').strip()
+                        exact_hit = hit.id+':'+coords
+                        found = False
+                        tmp = str(hit.seq).upper()
+                        contig = str(record.seq).upper()#contig
+                        if tmp in contig:
+                            boot_functionality(args, fout, fout2,  contig, tmp, seqs, hit)
+                            found = True
+                        else:
+                            tmp = str(hit.seq.reverse_complement()).upper()
+                            boot_functionality(args, fout, fout2, contig, tmp, seqs, hit)
+                            found = True
+                        assert found
+            fout.close()
+            fout2.close()
 
 
 
@@ -406,13 +403,25 @@ def add_ref(query_seqs, query, seq_type, blast_type):
     
     return fout
 
+def flag_stops(args, fout, fout2, record):
 
-   
+    if args.keep_flagged:#keep seqs with stop if operon or kmer
+        SeqIO.write(record,fout,'fasta')
+    else:
+        if record.seq.count('*') > 1:
+            SeqIO.write(record,fout2,'fasta')
+            #punt frame shifts and other errors to file for manual inspection
+        else:
+            SeqIO.write(record,fout,'fasta')
+
+    return fout, fout2
+
 def translated(args, query_seqs, query, seq_type, blast_type):
     
     '''
     Handles seq conversion if needed, excludes rubbish from further analysis
     '''
+    print ('translating...')
     fout = add_ref(query_seqs, query, seq_type, blast_type)
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
@@ -426,14 +435,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
                 SeqIO.write(record,fout,'fasta')
         if seq_type == 'aa':
             record.seq = record.seq.translate(table = 11)
-            if args.operon or args.keep_flagged:#keep seqs with stop if operon or kmer
-                SeqIO.write(record,fout,'fasta')
-            else:
-                if record.seq.count('*') > 1:
-                    SeqIO.write(record,fout2,'fasta')
-                    #punt frame shifts and other errors to file for manual inspection
-                else:
-                    SeqIO.write(record,fout,'fasta')
+            flag_stops(args, fout, fout2, record)
     fout.close()
     foutN.close()
     if seq_type == 'aa':
@@ -441,6 +443,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
  
 def multi(args, query_seqs, query, seq_type, blast_type):
 
+    print ('Selecting best seqs for', query, seq_type)
     catch_multiple_hits = collections.defaultdict(lambda:collections.defaultdict(str))
     hits_dict, query_seqs = parse_blast(args, dict_key = 'assembly', dict_value = 'query')
     qc = QC_fails(args, query)
@@ -477,19 +480,23 @@ def process_seqs(tup):
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
         fout = add_ref(query_seqs, query, 'aa', blast_type)
-        with open(query + '_seqs_without_contig_break.fasta','r') as fin:
-            for line in fin:
-                fout.write(line)
+        fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
+        for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
+            flag_stops(args, fout, fout2, record)
         fout.close()
-        make_fasta_non_redundant(args, query, 'aa')
-        clustal(args, query, 'aa')
+        fout2.close()
+        multi(args, query_seqs, query, 'aa', blast_type) 
     else:
         for seq_type in ['aa','nuc']:#aa first so have info re frame shifts
-            if args.operon and seq_type == 'aa':
+            if args.operon and seq_type =='aa':
                 continue
-            translated(args, query_seqs, query, seq_type, blast_type)
+            else:
+                translated(args, query_seqs, query, seq_type, blast_type)
         for seq_type in ['aa','nuc']:
-            multi(args, query_seqs, query, seq_type, blast_type)
+            if args.operon and seq_type =='aa':
+                continue
+            else:
+                multi(args, query_seqs, query, seq_type, blast_type)
             
 
 def gene_tree(args, directory = 'muscle_and_raxml'):
@@ -512,12 +519,13 @@ def variant_types(args, assemblies):
     query_seqs = list(query_seqs)#order
     variants_dik = collections.defaultdict(dict)
     for query in query_seqs:
-        for i, record in enumerate(SeqIO.parse(query + '_aa_non_redundant.fasta', 'fasta')):
+        for i, record in enumerate(SeqIO.parse(query + '_aa_unique_seqs.fasta', 'fasta')):
             if record.id == '0': #skip record.id, or ref twice
                 for sample in record.description.split(' ')[1].split(','):
                     if sample =='ref':
                         variants_dik['Ref'][query] = '0'
                     else:
+                        ass = '_'.join(sample.split('_')[:-1])
                         variants_dik[ass][query] = '0'
             else:
                 for sample in record.description.split(' ')[1].split(','):
