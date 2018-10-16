@@ -92,16 +92,17 @@ def main ():
     except: print ('issue with assembly name', list(sorted(assemblies)))
     print ('Starting Blast...')
     blast_type = blast(args)
-    print ('Snipping sequences from db and checking for contigs breaks...')
+    print ('Snipping sequences from db...')
         #Get fastas
     with Pool(processes=int(args.threads)) as pool:
         tmp = [(args, query) for query in query_seqs]
         pool.map(fasta, tmp)
-        
+    print ('Looking for hits at contig breaks...')
     with Pool(processes=int(args.threads)) as pool:
         tmp = [(args, query) for query in query_seqs]
         pool.map(boot_hits_at_contig_breaks, tmp)
         #Process seqs
+    print ('Processing seqs (running QC (if enabled)) and translating (if required)...')
     with Pool(processes=int(args.threads)) as pool:
         tmp = [(args, blast_type, query) for query in query_seqs]
         pool.map(process_seqs, tmp)
@@ -351,8 +352,8 @@ def gap_plot(args, query, seq_type):
     Line plot of aln to see where gaps are
     '''
     d= collections.defaultdict(int)
-    if os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):
-        for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundan_seqs.aln','fasta')):
+    if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+        for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln','fasta')):
             seq_str = str(record.seq)
             for j, aa in enumerate(seq_str):
                     if aa != '-':
@@ -369,18 +370,14 @@ def gap_plot(args, query, seq_type):
 
 def clustal(args, query, seq_type):
 	
-    print ('Clustal Omega call', query, seq_type)
-    if not os.path.exists(query + '_' + seq_type + '_non_redundan_seqs.aln'):	
+    if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):	
         call(['clustalo',
             '-i', query + '_' + seq_type + '_non_redundant.fasta',
             '-o', query + '_' + seq_type + '_non_redundant.aln',
             '--threads', '1'])#seems faster than just giving clustal muli threads
     
     if seq_type == 'aa':
-        print ('Start gap plot', query)
         gap_plot(args, query, seq_type)
-        print ('Finishd gap plot', query)
-    print ('Finishd aln and gap plot', query)
 
 def add_ref(query_seqs, query, seq_type, blast_type):
 
@@ -421,7 +418,6 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     '''
     Handles seq conversion if needed, excludes rubbish from further analysis
     '''
-    print ('translating...')
     fout = add_ref(query_seqs, query, seq_type, blast_type)
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
@@ -434,6 +430,10 @@ def translated(args, query_seqs, query, seq_type, blast_type):
             else:
                 SeqIO.write(record,fout,'fasta')
         if seq_type == 'aa':
+            current_len = len(str(record.seq))
+            while current_len%3!=0:
+                current_len -= 1
+            record.seq = record.seq[:current_len]
             record.seq = record.seq.translate(table = 11)
             flag_stops(args, fout, fout2, record)
     fout.close()
@@ -443,7 +443,6 @@ def translated(args, query_seqs, query, seq_type, blast_type):
  
 def multi(args, query_seqs, query, seq_type, blast_type):
 
-    print ('Selecting best seqs for', query, seq_type)
     catch_multiple_hits = collections.defaultdict(lambda:collections.defaultdict(str))
     hits_dict, query_seqs = parse_blast(args, dict_key = 'assembly', dict_value = 'query')
     qc = QC_fails(args, query)
@@ -476,7 +475,6 @@ def process_seqs(tup):
     '''
 
     args, blast_type, query = tup
-    print ('start aln', query)
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
         fout = add_ref(query_seqs, query, 'aa', blast_type)
@@ -592,7 +590,7 @@ def var_pos_csv(args, blast_type):
         for seq_type in ['nuc', 'aa']:
             if blast_type == 'tblastn' and seq_type == 'nuc':
                 continue#no ref
-            if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):
+            if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
                 continue # skip nuc if using aa and or any seqs without hits
             number_hits, ref_dik, length = var_pos(args, seq_type, query)
             fout = open(query + '_' + seq_type + '_pos.csv','w')#checked 
@@ -611,8 +609,7 @@ def var_pos(args, seq_type, query):
     '''
     #ref
     ref_dik = collections.OrderedDict()
-    print ('var posssss', seq_type, query)        
-    for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
+    for record in SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln', 'fasta'):
         if record.id == 'ref':
             ref_seq = str(record.seq)
             for i, nuc in enumerate(ref_seq):
@@ -621,7 +618,7 @@ def var_pos(args, seq_type, query):
     #hits
     number_hits = 0
     length = 10 # hack so doesn't fall over if no hits
-    for record in SeqIO.parse(query + '_' + seq_type + '_seqs.aln', 'fasta'):
+    for record in SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln', 'fasta'):
         if record.id == 'ref':
             continue
         number_hits += 1 
@@ -678,8 +675,8 @@ def plot_vars(args, seq_type = 'aa'):
 	print ('Plottings vars....')
 	query_seqs = get_query_seqs(args)
 	for query in query_seqs:
-		if not os.path.exists(query + '_' + seq_type + '_seqs.aln'):
-			print ('Skipping ' + query + '_seqs.aln')
+		if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+			print ('Skipping ' + query + '_non_redundant.aln')
 			continue
 		number_hits, ref_dik, length = var_pos(args, seq_type, query)	
 		if number_hits == 0:
@@ -798,16 +795,19 @@ def sanity_check(args, blast_type):
     labels = {}
     
     for query in query_seqs:
-        if args.operon:
-            for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
-                  remaining_seqs = i #not i + 1 cuz ref in there
-            if blast_type == 'tblastn':
-                remaining_seqs += 1 #no ref
-        else:
-            for i, record in enumerate(SeqIO.parse(query + '_aa_non_redundant.aln', 'fasta')):
-                remaining_seqs = i #not i + 1 cuz ref in there
-
-        labels[query] = remaining_seqs
+        try:
+            if args.operon:
+                for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
+                    remaining_seqs = i #not i + 1 cuz ref in there
+                if blast_type == 'tblastn':
+                    remaining_seqs += 1 #no ref
+            else:
+                for i, record in enumerate(SeqIO.parse(query + '_aa_non_redundant.aln', 'fasta')):
+                    remaining_seqs = i #not i + 1 cuz ref in there
+            labels[query] = remaining_seqs
+        except:
+            labels[query] = 0
+            print ('No aln found for', query)
 
     return labels
 
