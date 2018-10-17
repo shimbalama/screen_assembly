@@ -192,14 +192,16 @@ def pick_top_hit(query, hits_dict, ass, omited):
     if ass =='ref':
         length, percent, coords = 100.0, 100.0, 'ref'  
     else:
-        for tup in hits_dict.get(ass).get(query):
-            length, percent, coords = tup
-            if coords not in omited:
-                if sum([length, percent]) > max_tup:
-                    max_tup = sum([length, percent])
-                    biggest_tup = tup
-        length, percent, coords = biggest_tup
-    
+        try:
+            for tup in hits_dict.get(ass).get(query):
+                length, percent, coords = tup
+                if coords not in omited:
+                    if sum([length, percent]) > max_tup:
+                        max_tup = sum([length, percent])
+                        biggest_tup = tup
+            length, percent, coords = biggest_tup
+        except:
+            length, percent, coords = 0.0, 0.0, 'NA'
     return length, percent, coords
 
 def helper(csv, hits_per_query, query, fout, hits_dict, ass, omited = set([])):
@@ -731,12 +733,15 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
             for line in fin:
                 bits = line.strip().split()
                 query, hit, percent = bits[:3]
-                if not args.keep_flagged:
-                    if hit+':'+bits[8]+'-'+bits[9] in qc:
-                        continue
-                if float(percent) >= percent_identity:
-                    ass = '_'.join(hit.split('_')[:-1])
-                    tmp[query][ass].append(float(percent))
+                if not 'pdb' in hit:
+                    if not args.keep_flagged:
+                        if hit+':'+bits[8]+'-'+bits[9] in qc:
+                            continue
+                    if float(percent) >= percent_identity:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        tmp[query][ass].append(float(percent))
+                else:
+                    print('csv: skipping hit', hit, 'blast has removed contig information')
         for query in tmp:
             for ass in tmp.get(query):
                 biggest_hit = max(tmp[query][ass])
@@ -751,10 +756,13 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                 query, hit, percent = bits[:3]
                 length = float(line.strip().split()[-1])
                 percent = float(percent)
-                if percent >= percent_identity and length >= percent_length:
-                    ass = '_'.join(hit.split('_')[:-1])
-                    tup = length, percent, hit+':'+bits[8]+'-'+bits[9]
-                    hits_dict[ass][query].append(tup)
+                if not 'pdb' in hit:
+                    if percent >= percent_identity and length >= percent_length:
+                        ass = '_'.join(hit.split('_')[:-1])
+                        tup = length, percent, hit+':'+bits[8]+'-'+bits[9]
+                        hits_dict[ass][query].append(tup)
+                else:
+                    print('csv: skipping hit', hit, 'blast has removed contig information')
     #heatmap itol
     elif dict_key == 'assembly' and dict_value == 'percent':
         hits_dict = collections.defaultdict(lambda: collections.defaultdict(float))
@@ -769,7 +777,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                 if not args.keep_flagged:
                     if hit+':'+bits[8]+'-'+bits[9] in qc:
                         continue
-                if not 'pdb' in hit and not '|' in hit:
+                if not 'pdb' in hit:#wtf is this pdb?
                     if percent >= percent_identity:
                         ass = '_'.join(hit.split('_')[:-1])
                         try: assert ass in assemblies
@@ -777,7 +785,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                         if percent > hits_dict.get(ass).get(query):#if 2 + use largest
                             hits_dict[ass][query] = percent#itol heatmap
                 else:
-                    print('skipping hit', hit, 'blast has removed contig information')
+                    print('itol: skipping hit', hit, 'blast has removed contig information')
     else:
         print ("Can't parse Blast")
             
