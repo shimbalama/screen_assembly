@@ -121,11 +121,12 @@ def main ():
                 assert hits_per_query_dik.get(query) == hits_per_query_dik2.get(query)
             except:
                 print ('Hits per csv dont match hits in the box plot!', query)
-                if 'ref' in hits_per_query_dik.get(query):
-                    print ('ref in ',1)
-                if 'ref' in hits_per_query_dik2.get(query):
-                    print ('ref in ',2)
-                print ('Problem',query, set(hits_per_query_dik.get(query)).difference(set(hits_per_query_dik2.get(query))),set(hits_per_query_dik2.get(query)).difference(set(hits_per_query_dik.get(query))))
+                if hits_per_query_dik.get(query) and hits_per_query_dik2.get(query):
+                    print ('Problem',query,
+                    set(hits_per_query_dik.get(query)).difference(set(hits_per_query_dik2.get(query))),
+                    set(hits_per_query_dik2.get(query)).difference(set(hits_per_query_dik.get(query))))
+                else:
+                    print (1, hits_per_query_dik.get(query) == None, 2, hits_per_query_dik2.get(query) == None)  
                 if not args.ignore_warnings:
                     sys.exit(0)
         if args.plots:
@@ -857,7 +858,7 @@ def box(args, assemblies, blast_type):
         carriage_bar = []
         for query in query_seq_names:
             try: assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
-            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)))
+            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query). labels.get(query))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
