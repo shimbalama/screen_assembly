@@ -54,6 +54,7 @@ def main ():
     group.add_argument("-l", "--percent_length", type=str, help="Percent_length. Default 80.", default='80')
     group.add_argument('-o', "--operon", action='store_true', default=False, help='Seq is operon or kmer, something where stops are expected')
     group.add_argument("-k", "--keep_flagged", action='store_true', help="Include hits flagged with Ns, premature stops or contig breaks. Default off.", default=False)
+    group.add_argument("-y", "--ignore_warnings", action='store_true', help="Ignore warnings", default=False)
    
     phy = parser.add_argument_group('Phylogeny', 'Can take a long time')
     phy.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
@@ -115,21 +116,29 @@ def main ():
     if args.aln:
         print ('Making a Box plot')
         hits_per_query_dik = sanity_check(args, blast_type)
-        try:
-            assert hits_per_query_dik == hits_per_query_dik2 #check the hits in the csv are teh same as in the plot
-        except:
-            print ('Hits per csv dont match hits in the box plot!')
-            print ('from box plot (which is from query_aa_non_redundant.aln)',hits_per_query_dik)
-            print ('from csv binary hits (from blast)', hits_per_query_dik2)
-            sys.exit(0)
+        for query in hits_per_query_dik:
+            try:
+                assert hits_per_query_dik.get(query) == hits_per_query_dik2.get(query)
+            except:
+                print ('Hits per csv dont match hits in the box plot!', query)
+                if 'ref' in hits_per_query_dik.get(query):
+                    print ('ref in ',1)
+                if 'ref' in hits_per_query_dik2.get(query):
+                    print ('ref in ',2)
+                print ('Problem',query, set(hits_per_query_dik.get(query)).difference(set(hits_per_query_dik2.get(query))),set(hits_per_query_dik2.get(query)).difference(set(hits_per_query_dik.get(query))))
+                if not args.ignore_warnings:
+                    sys.exit(0)
         if args.plots:
             print ('Plotting...')
             if args.operon:
-                if blast_type != 'tblastn':#no ref in nuc
-                    plot_vars(args, 'nuc')
+                with Pool(processes=int(args.threads)) as pool:
+                    tmp = [(args, query, 'nuc') for query in query_seqs]
+                    pool.map(plot_vars, tmp)
             else:
                 variant_types(args, assemblies) 
-                plot_vars(args)   
+                with Pool(processes=int(args.threads)) as pool:
+                    tmp = [(args, query, 'aa') for query in query_seqs]
+                    pool.map(plot_vars, tmp)   
             var_pos_csv(args, blast_type)
     if args.raxml:
         print ('Running RAXML... please be patient!')
@@ -207,7 +216,7 @@ def pick_top_hit(query, hits_dict, ass, omited):
 def helper(csv, hits_per_query, query, fout, hits_dict, ass, omited = set([])):
 
     if csv == 'binary_hits':
-        hits_per_query[query] += 1
+        hits_per_query[query].add(ass)
         fout.write('1,')
     if csv == 'total_hits':
         fout.write(str(len(hits_dict.get(ass).get(query)))+',')
@@ -231,10 +240,11 @@ def csv(args, assemblies, binary = True):
             header = 'Names,' + ','.join(query_seqs) +'\n'
             fout.write(header)
             if csv == 'binary_hits':
-                hits_per_query = {}
-                for query in query_seqs:
-                    hits_per_query[query] = 0
+                hits_per_query = collections.defaultdict(set)
             for ass in assemblies:
+                ass = ass.replace('gnl|MYDB|','')
+                if ass == 'ref':
+                    continue
                 fout.write(ass +',')
                 for query in query_seqs:
                     if query in hits_dict.get(ass, []):
@@ -295,16 +305,13 @@ def boot_hits_at_contig_breaks(tup):
         seqs = collections.defaultdict(list)
         if not os.path.exists(query + '_seqs_without_contig_break.fasta'): #don't redo if already done when re-running
             for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
-                if ':' in record.id:#sometimes randomly adds coordinates? wtf
-                    id_, pos = record.id.strip().split(':')
-                    record.id = id_
-                    record.decription = pos
                 seqs[record.id].append(record)
             fout = open(query + '_seqs_without_contig_break.fasta','w')#Don't touch contig break
             fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
             for record in SeqIO.parse(cat,'fasta'):
-                if record.id in seqs:
-                    for hit in seqs.get(record.id):
+                seq_id = str(record.id).replace('gnl|MYDB|','')
+                if seq_id in seqs:
+                    for hit in seqs.get(seq_id):
                         coords = hit.description.replace(record.id,'').strip()
                         exact_hit = hit.id+':'+coords
                         found = False
@@ -355,20 +362,21 @@ def gap_plot(args, query, seq_type):
     '''
     d= collections.defaultdict(int)
     if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
-        for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln','fasta')):
-            seq_str = str(record.seq)
-            for j, aa in enumerate(seq_str):
+        if not os.path.exists(query +'_gaps.svg'):
+            for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln','fasta')):
+                seq_str = str(record.seq)
+                for j, aa in enumerate(seq_str):
                     if aa != '-':
-                            d[j+1] += 1
+                        d[j+1] += 1
 
-        if i > 1:
-            plt.plot(d.values())
-            plt.axis([0, len(d), 0, max(d.values())+1])
-            plt.ylabel('Unique sequences')
-            plt.xlabel('Alignment length including gaps')
-            plt.title('Position of indels in ' + query + ' with ' + str(max(d.values())) + ' sequences')
-            plt.savefig(query +'_gaps.svg')
-            plt.close()
+            if i > 1:
+                plt.plot(d.values())
+                plt.axis([0, len(d), 0, max(d.values())+1])
+                plt.ylabel('Unique sequences')
+                plt.xlabel('Alignment length including gaps')
+                plt.title('Position of indels in ' + query + ' with ' + str(max(d.values())) + ' sequences')
+                plt.savefig(query +'_gaps.svg')
+                plt.close('all')
 
 def clustal(args, query, seq_type):
 	
@@ -407,7 +415,7 @@ def flag_stops(args, fout, fout2, record):
     if args.keep_flagged:#keep seqs with stop if operon or kmer
         SeqIO.write(record,fout,'fasta')
     else:
-        if record.seq.count('*') > 1:
+        if str(record.seq).count('*') > 1:
             SeqIO.write(record,fout2,'fasta')
             #punt frame shifts and other errors to file for manual inspection
         else:
@@ -432,10 +440,6 @@ def translated(args, query_seqs, query, seq_type, blast_type):
             else:
                 SeqIO.write(record,fout,'fasta')
         if seq_type == 'aa':
-            current_len = len(str(record.seq))
-            while current_len%3!=0:
-                current_len -= 1
-            record.seq = record.seq[:current_len]
             record.seq = record.seq.translate(table = 11)
             flag_stops(args, fout, fout2, record)
     fout.close()
@@ -503,10 +507,10 @@ def gene_tree(args, directory = 'muscle_and_raxml'):
 
     query_seqs = get_query_seqs(args)
     for query in query_seqs:
-        for i, record in enumerate(SeqIO.parse(query + '_nuc_seqs.aln', 'fasta')):
+        for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
             pass
         if i > 1:#make sure it not just ref seq
-            tree(args, query,  '_nuc_seqs.aln', args.raxml_executable, args.bootstraps, args.raxml_model)
+            tree(args, query,  '_nuc_non_redundant.aln', args.raxml_executable, args.bootstraps, args.raxml_model)
 
 
 def variant_types(args, assemblies):
@@ -648,70 +652,68 @@ def var_pos(args, seq_type, query):
 
 def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_hits, query, seq_types):
 
-	'''
-	PLot vars v ref seq
-	'''
+    '''
+    PLot vars v ref seq
+    '''
 
-	df = pd.DataFrame(list_of_diks, index=list_of_dik_names)
-	df_bar = df.transpose()
-	n = 100 #ticks
-	ax = df_bar.plot.bar(figsize=(15,8), edgecolor = "none", width = 1, stacked=True)
-	ticks = ax.xaxis.get_ticklocs()
-	ticklabels = [l.get_text() for l in ax.xaxis.get_ticklabels()]
-	yticks = [i for i in range(101)]
-	ax.yaxis.set_ticks(yticks[0:101:20])
-	ax.xaxis.set_ticks(ticks[::n])
-	ax.xaxis.set_ticklabels(ticklabels[::n])
-	plt.xlabel('Reference lenght: ' + str(length) + ' positions with var: ' + str(total))
-	plt.title(query + ' (samples = ' + str(number_hits) +')')
-	plt.ylabel('Number of samples with ' + seq_types + ' %')
-	plt.savefig(query+'_'+seq_types+'.svg')
+    df = pd.DataFrame(list_of_diks, index=list_of_dik_names)
+    df_bar = df.transpose()
+    n = 100 #ticks
+    ax = df_bar.plot.bar(figsize=(15,8), edgecolor = "none", width = 1, stacked=True)
+    ticks = ax.xaxis.get_ticklocs()
+    ticklabels = [l.get_text() for l in ax.xaxis.get_ticklabels()]
+    yticks = [i for i in range(101)]
+    ax.yaxis.set_ticks(yticks[0:101:20])
+    ax.xaxis.set_ticks(ticks[::n])
+    ax.xaxis.set_ticklabels(ticklabels[::n])
+    plt.xlabel('Reference lenght: ' + str(length) + ' positions with var: ' + str(total))
+    plt.title(query + ' (samples = ' + str(number_hits) +')')
+    plt.ylabel('Number of samples with ' + seq_types + ' %')
+    plt.savefig(query+'_'+seq_types+'.svg')
 
 
 
-def plot_vars(args, seq_type = 'aa'):
+def plot_vars(tup):
 
-	'''
-	Plots the distribution of vars (SNPs/indels) on the seq and saves as SVG
-	'''
-	print ('Plottings vars....')
-	query_seqs = get_query_seqs(args)
-	for query in query_seqs:
-		if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
-			print ('Skipping ' + query + '_non_redundant.aln')
-			continue
-		number_hits, ref_dik, length = var_pos(args, seq_type, query)	
-		if number_hits == 0:
-			continue
-		#Get SNP/indel positions in gap free ref seq
-		snp_dik = collections.OrderedDict()
-		ins_dik = collections.OrderedDict()
-		del_dik = collections.OrderedDict()
-		total = 0
-		gaps = 0 # Want to plot ref seq without '-'s the pos csv has them so will be out of sunc at end
-		for pos in ref_dik:
-			pos_in_seq = int(pos)-gaps
-			nuc, snp, ins, del_count, _ = ref_dik.get(pos)	
-			if int(snp) != 0:
-				total +=1
-			if nuc == '-':#not perfect - colapses ins and overwrites with last count... but how else..?
-				ins_dik[pos_in_seq] = (float(ins)/float(number_hits))*100 
-				gaps +=1
-			else:
-				#ins_dik[pos_in_seq] = 0.0
-				if del_count == 0:
-					del_dik[pos_in_seq] = 0.0
-				else:
-					del_dik[pos_in_seq] = (float(del_count)/float(number_hits))*100
-				if snp == 0:
-					snp_dik[pos_in_seq] = 0.0
-				else:
-					snp_dik[pos_in_seq] = (float(snp)/float(number_hits))*100
-		#plot
-		plot_vars_func(args, [snp_dik], ['SNPs'], length, total, number_hits, query, seq_type + '_variants')	
-		plot_vars_func(args, [ins_dik, del_dik], ['Insertions', 'Deletions'], length, total, number_hits, query,
-                        seq_type + '_indels')
+    '''
+    Plots the distribution of vars (SNPs/indels) on the seq and saves as SVG
+    '''
+    args, query, seq_type = tup
+    print ('Plottings vars....')
 
+    if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+        number_hits, ref_dik, length = var_pos(args, seq_type, query)	
+        if number_hits != 0:
+            #Get SNP/indel positions in gap free ref seq
+            snp_dik = collections.OrderedDict()
+            ins_dik = collections.OrderedDict()
+            del_dik = collections.OrderedDict()
+            total = 0
+            gaps = 0 # Want to plot ref seq without '-'s the pos csv has them so will be out of sunc at end
+            for pos in ref_dik:
+                pos_in_seq = int(pos)-gaps
+                nuc, snp, ins, del_count, _ = ref_dik.get(pos)	
+                if int(snp) != 0:
+                    total +=1
+                if nuc == '-':#not perfect - colapses ins and overwrites with last count... but how else..?
+                    ins_dik[pos_in_seq] = (float(ins)/float(number_hits))*100 
+                    gaps +=1
+                else:
+                    #ins_dik[pos_in_seq] = 0.0
+                    if del_count == 0:
+                        del_dik[pos_in_seq] = 0.0
+                    else:
+                        del_dik[pos_in_seq] = (float(del_count)/float(number_hits))*100
+                    if snp == 0:
+                        snp_dik[pos_in_seq] = 0.0
+                    else:
+                        snp_dik[pos_in_seq] = (float(snp)/float(number_hits))*100
+            #plot
+            plot_vars_func(args, [snp_dik], ['SNPs'], length, total, number_hits, query, seq_type + '_variants')	
+            plot_vars_func(args, [ins_dik, del_dik], ['Insertions', 'Deletions'], length, total, number_hits, query,
+                           seq_type + '_indels')
+        else:
+            print ('Skipping ' + query + '_non_redundant.aln')
 
 def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'percent'):
 	
@@ -733,6 +735,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
             for line in fin:
                 bits = line.strip().split()
                 query, hit, percent = bits[:3]
+                hit = hit.replace('gnl|MYDB|','')
                 if not 'pdb' in hit:
                     if not args.keep_flagged:
                         if hit+':'+bits[8]+'-'+bits[9] in qc:
@@ -754,6 +757,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
             for line in fin: 
                 bits=line.strip().split()
                 query, hit, percent = bits[:3]
+                hit = hit.replace('gnl|MYDB|','')
                 length = float(line.strip().split()[-1])
                 percent = float(percent)
                 if not 'pdb' in hit:
@@ -767,12 +771,14 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
     elif dict_key == 'assembly' and dict_value == 'percent':
         hits_dict = collections.defaultdict(lambda: collections.defaultdict(float))
         for ass in assemblies:#prefil
+            ass = ass.replace('gnl|MYDB|','')
             for query in query_seqs:
                 hits_dict[ass][query] = 0.0
         with open('blast_out.txt', 'r') as fin:
             for line in fin:
                 bits = line.strip().split()
                 query, hit, percent = bits[:3]
+                hit = hit.replace('gnl|MYDB|','')
                 percent = float(percent)
                 if not args.keep_flagged:
                     if hit+':'+bits[8]+'-'+bits[9] in qc:
@@ -781,7 +787,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                     if percent >= percent_identity:
                         ass = '_'.join(hit.split('_')[:-1])
                         try: assert ass in assemblies
-                        except: print (ass, 'not in assemblies')
+                        except: print (ass, 'not in assemblies', assemblies)
                         if percent > hits_dict.get(ass).get(query):#if 2 + use largest
                             hits_dict[ass][query] = percent#itol heatmap
                 else:
@@ -800,21 +806,22 @@ def sanity_check(args, blast_type):
     query_seqs = get_query_seqs(args)
     query_seqs = list(query_seqs.keys())
 
-    labels = {}
+    labels = collections.defaultdict(set)
     
     for query in query_seqs:
         try:
             if args.operon:
                 for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
-                    remaining_seqs = i #not i + 1 cuz ref in there
-                if blast_type == 'tblastn':
-                    remaining_seqs += 1 #no ref
+                    ass = '_'.join(record.id.split('_')[:-1])
+                    if record.id != 'ref':
+                        labels[query].add(ass)
             else:
                 for i, record in enumerate(SeqIO.parse(query + '_aa_non_redundant.aln', 'fasta')):
-                    remaining_seqs = i #not i + 1 cuz ref in there
-            labels[query] = remaining_seqs
+                    ass = '_'.join(record.id.split('_')[:-1])
+                    if record.id != 'ref':
+                         labels[query].add(ass)
         except:
-            labels[query] = 0
+            labels[query] = []
             print ('No aln found for', query)
 
     return labels
