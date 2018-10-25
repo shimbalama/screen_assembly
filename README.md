@@ -1,6 +1,6 @@
 # Screen assemblies
 
-Pipeline that screens for presence of genes of interest (GOI) in bacterial assemblies. Generates multiple CSVs and plots that descirbe which genes are present and how variable their sequence is. Can use DNA or protein query sequences (GOIs) and DNA contigs/fastas or protein fastas as database (db) to search in. 
+Pipeline that screens for presence of genes of interest (GOI) in bacterial assemblies. Generates multiple CSVs and plots that describe which genes are present and how variable their sequence is. Can use DNA or protein query sequences (GOIs) and DNA contigs/fastas or protein fastas as database (db) to search in. 
 
 ## Getting Started
 
