@@ -1,10 +1,10 @@
 # Screen assemblies
 
-Pipeline that screens for presence of genes of interest (GOI) in bacterial assemblies. Generates multiple CSVs and plots that descirbe which genes are present and how variabel their sequence is. Can you DNA or protein query sequences (GOIs) and DNA contigs/fastas or proein fastas as database (db) to search in. 
+Pipeline that screens for presence of genes of interest (GOI) in bacterial assemblies. Generates multiple CSVs and plots that descirbe which genes are present and how variable their sequence is. Can use DNA or protein query sequences (GOIs) and DNA contigs/fastas or protein fastas as database (db) to search in. 
 
 ## Getting Started
 
-You need one fasta file with all GOIs as the query and a folder with db contigs/fastas. Db files can only have one '.' in the (i.e., sample_1.fa NOT sample.1.fa) 
+You need one fasta file with all GOIs as the query and a folder with db contigs/fastas. Db files can only have one '.' in the name (i.e., sample_1.fa NOT sample.1.fa) 
 
 ### Prerequisites
 
@@ -38,7 +38,7 @@ RAXML and or IQtree
 
 ## Running the tests
 
-Once screen_assembly3.py is in your PATH type screen_assembly3.py -h . If you have all dependencies then the menu will display. Otherwise read the erorr and install whichever dependency is missing.
+Once screen_assembly3.py is in your PATH type screen_assembly3.py -h . If you have all dependencies then the help menu will display. Otherwise read the erorr and install whichever dependency is missing.
 
 ## Running the program
 
