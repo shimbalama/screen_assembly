@@ -49,7 +49,7 @@ def main ():
     group.add_argument("-t", "--threads", type=str, help="How many threads to give blast, muscle, raxml etc.", default = '4') 
     group.add_argument("-d", "--dNdS", action='store_true', help="Calculate dNdS. Off by default.", default=False)
     group.add_argument("-a", "--aln", action='store_false', help="Make alignments with muscle. On by default.", default=True)
-    group.add_argument("-x", "--plots", action='store_false', help="Make plots. On by default.", default=True)
+    group.add_argument("-x", "--plots", action='store_false', help="Make gap and aa variation plots. Some versions of MAC OS are incompatable with these plots and cause crashes. On by default.", default=True)
     group.add_argument("-p", "--percent_identity", type=str, help="Percent_identity. Default 80.", default='80')
     group.add_argument("-l", "--percent_length", type=str, help="Percent_length. Default 80.", default='80')
     group.add_argument('-o', "--operon", action='store_true', default=False, help='Seq is operon or kmer, something where stops are expected')
@@ -107,7 +107,11 @@ def main ():
     with Pool(processes=int(args.threads)) as pool:
         tmp = [(args, blast_type, query) for query in query_seqs]
         pool.map(process_seqs, tmp)
-        
+    
+    with Pool(processes=int(args.threads)) as pool:
+        tmp = [(args, blast_type, query) for query in query_seqs]
+        pool.map(process_seqs2, tmp)     
+    
     print ('Making an itol template...')
     itol(args, assemblies)
     print ('Making a CSV summary of results...')
@@ -120,14 +124,16 @@ def main ():
             try:
                 assert hits_per_query_dik.get(query) == hits_per_query_dik2.get(query)
             except:
-                print ('Hits per csv dont match hits in the box plot!', query)
                 if hits_per_query_dik.get(query) and hits_per_query_dik2.get(query):
                     print ('Problem',query,
                     set(hits_per_query_dik.get(query)).difference(set(hits_per_query_dik2.get(query))),
                     set(hits_per_query_dik2.get(query)).difference(set(hits_per_query_dik.get(query))))
+                elif hits_per_query_dik.get(query) == [] and hits_per_query_dik2.get(query) == None:
+                    continue
                 else:
                     print (1, hits_per_query_dik.get(query) == None, 2, hits_per_query_dik2.get(query) == None)  
                 if not args.ignore_warnings:
+                    print ('Hits per csv dont match hits in the box plot!', query)
                     sys.exit(0)
         if args.plots:
             print ('Plotting...')
@@ -307,28 +313,25 @@ def boot_hits_at_contig_breaks(tup):
         if not os.path.exists(query + '_seqs_without_contig_break.fasta'): #don't redo if already done when re-running
             for record in SeqIO.parse(query + '_all_nuc_seqs.fasta','fasta'):
                 seqs[record.id].append(record)
-            fout = open(query + '_seqs_without_contig_break.fasta','w')#Don't touch contig break
-            fout2 = open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w')
-            for record in SeqIO.parse(cat,'fasta'):
-                seq_id = str(record.id).replace('gnl|MYDB|','')
-                if seq_id in seqs:
-                    for hit in seqs.get(seq_id):
-                        coords = hit.description.replace(record.id,'').strip()
-                        exact_hit = hit.id+':'+coords
-                        found = False
-                        tmp = str(hit.seq).upper()
-                        contig = str(record.seq).upper()#contig
-                        if tmp in contig:
-                            boot_functionality(args, fout, fout2,  contig, tmp, seqs, hit)
-                            found = True
-                        else:
-                            tmp = str(hit.seq.reverse_complement()).upper()
-                            boot_functionality(args, fout, fout2, contig, tmp, seqs, hit)
-                            found = True
-                        assert found
-            fout.close()
-            fout2.close()
-
+            with open(query + '_seqs_without_contig_break.fasta','w') as fout:#Don't touch contig break
+                with open(query + '_nuc_seqs_excluded_due_to_contig_break.fasta','w') as fout2:
+                    for record in SeqIO.parse(cat,'fasta'):
+                        seq_id = str(record.id).replace('gnl|MYDB|','')
+                        if seq_id in seqs:
+                            for hit in seqs.get(seq_id):
+                                coords = hit.description.replace(record.id,'').strip()
+                                exact_hit = hit.id+':'+coords
+                                found = False
+                                tmp = str(hit.seq).upper()
+                                contig = str(record.seq).upper()#contig
+                                if tmp in contig:
+                                    boot_functionality(args, fout, fout2,  contig, tmp, seqs, hit)
+                                    found = True
+                                else:
+                                    tmp = str(hit.seq.reverse_complement()).upper()
+                                    boot_functionality(args, fout, fout2, contig, tmp, seqs, hit)
+                                    found = True
+                                assert found
 
 
 def make_fasta_non_redundant(args, query, seq_type):
@@ -387,29 +390,32 @@ def clustal(args, query, seq_type):
             '-o', query + '_' + seq_type + '_non_redundant.aln',
             '--threads', '1'])#seems faster than just giving clustal muli threads
     
-    if seq_type == 'aa':
-        gap_plot(args, query, seq_type)
+    if args.plots:
+        if seq_type == 'aa':
+            gap_plot(args, query, seq_type)
 
-def add_ref(query_seqs, query, seq_type, blast_type):
+def add_ref(args, query, seq_type, blast_type):
 
     '''
     Adds to ref for alignment
     '''
-    
+    query_seqs = get_query_seqs(args)
     fout = open(query + '_seqs_and_ref_' + seq_type + '.fasta','w')
     record = query_seqs.get(query)
     if blast_type == 'tblastn' and seq_type == 'nuc':
         return fout #don't want aa ref with nuc hits 
     else:
-        fout.write('>ref\n')
+        record.id = 'ref'
         if seq_type == 'aa':
             try:
                 record.seq = record.seq.translate(table = 11)
+                SeqIO.write(record,fout,'fasta')
             except:
                 pass #hack to not crash if is aa
-    fout.write(str(record.seq) + '\n')
+        else:
+            SeqIO.write(record,fout,'fasta')
     
-    return fout
+        return fout
 
 def flag_stops(args, fout, fout2, record):
 
@@ -429,7 +435,7 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     '''
     Handles seq conversion if needed, excludes rubbish from further analysis
     '''
-    fout = add_ref(query_seqs, query, seq_type, blast_type)
+    fout = add_ref(args, query, seq_type, blast_type)
     foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
     if seq_type == 'aa':
         fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
@@ -484,19 +490,27 @@ def process_seqs(tup):
     args, blast_type, query = tup
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
-        fout = add_ref(query_seqs, query, 'aa', blast_type)
+        fout = add_ref(args, query, 'aa', blast_type)
         fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
         for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
             flag_stops(args, fout, fout2, record)
         fout.close()
         fout2.close()
-        multi(args, query_seqs, query, 'aa', blast_type) 
+        #multi(args, query_seqs, query, 'aa', blast_type) 
     else:
         for seq_type in ['aa','nuc']:#aa first so have info re frame shifts
             if args.operon and seq_type =='aa':
                 continue
             else:
                 translated(args, query_seqs, query, seq_type, blast_type)
+        
+def process_seqs2(tup):
+
+    args, blast_type, query = tup
+    query_seqs = get_query_seqs(args)
+    if blast_type == 'blastp':#no nuc output if prot query used
+        multi(args, query_seqs, query, 'aa', blast_type)
+    else:    
         for seq_type in ['aa','nuc']:
             if args.operon and seq_type =='aa':
                 continue
@@ -725,7 +739,6 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
  
     percent_length = float(args.percent_length)
     percent_identity = float(args.percent_identity) # Blast regularly calls 99% where its def 100% by direct str
-    
     qc, _ = rejects(args)
     #query as key
     if dict_key == 'query' and dict_value == 'percent':#for box n wisker
@@ -856,8 +869,13 @@ def box(args, assemblies, blast_type):
         variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
         carriage_bar = []
         for query in query_seq_names:
-            try: assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
-            except: print('assert fail', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query). labels.get(query))
+            try: 
+                assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
+            except: 
+                if labels.get(query) == 0 and percent_dict.get(query) == [0.0]:
+                    pass
+                else:
+                    print('assert fail!!iii', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query))
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
@@ -972,7 +990,8 @@ def rejects(args):
         reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
         reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
         if not args.operon:
-            assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+            try: assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+            except: print (query, 'fail check 1: ', query + '_seqs_and_ref_aa_multiple_stops.fasta')
             reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
     
     return reject_set, reject_dik
