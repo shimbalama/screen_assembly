@@ -394,13 +394,12 @@ def clustal(args, query, seq_type):
         if seq_type == 'aa':
             gap_plot(args, query, seq_type)
 
-def add_ref(args, query, seq_type, blast_type):
+def add_ref(args, query, seq_type, blast_type, fout):
 
     '''
     Adds to ref for alignment
     '''
     query_seqs = get_query_seqs(args)
-    fout = open(query + '_seqs_and_ref_' + seq_type + '.fasta','w')
     record = query_seqs.get(query)
     if blast_type == 'tblastn' and seq_type == 'nuc':
         return fout #don't want aa ref with nuc hits 
@@ -435,24 +434,24 @@ def translated(args, query_seqs, query, seq_type, blast_type):
     '''
     Handles seq conversion if needed, excludes rubbish from further analysis
     '''
-    fout = add_ref(args, query, seq_type, blast_type)
-    foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
-    if seq_type == 'aa':
-        fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
-    for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
-        seq = str(record.seq).upper()
-        if seq_type == 'nuc':
-            if 'N' in seq and not args.keep_flagged:
-                SeqIO.write(record,foutN,'fasta')
-            else:
-                SeqIO.write(record,fout,'fasta')
+    with open(query + '_seqs_and_ref_' + seq_type + '.fasta','w') as fout:
+        fout = add_ref(args, query, seq_type, blast_type, fout)
+        foutN = open(query + '_seqs_and_ref_' + seq_type + '_Ns.fasta','w')
         if seq_type == 'aa':
-            record.seq = record.seq.translate(table = 11)
-            flag_stops(args, fout, fout2, record)
-    fout.close()
-    foutN.close()
-    if seq_type == 'aa':
-        fout2.close()
+            fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
+        for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta', 'fasta'):
+            seq = str(record.seq).upper()
+            if seq_type == 'nuc':
+                if 'N' in seq and not args.keep_flagged:
+                    SeqIO.write(record,foutN,'fasta')
+                else:
+                    SeqIO.write(record,fout,'fasta')
+            if seq_type == 'aa':
+                record.seq = record.seq.translate(table = 11)
+                fout, fout2 = flag_stops(args, fout, fout2, record)
+        foutN.close()
+        if seq_type == 'aa':
+            fout2.close()
  
 def multi(args, query_seqs, query, seq_type, blast_type):
 
@@ -490,12 +489,12 @@ def process_seqs(tup):
     args, blast_type, query = tup
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
-        fout = add_ref(args, query, 'aa', blast_type)
-        fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
-        for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
-            flag_stops(args, fout, fout2, record)
-        fout.close()
-        fout2.close()
+        with open(query + '_seqs_and_ref_' + seq_type + '.fasta','w') as fout:
+            fout = add_ref(args, query, 'aa', blast_type, fout)
+            fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
+            for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
+                fout, fout2 = flag_stops(args, fout, fout2, record)
+            fout2.close()
         #multi(args, query_seqs, query, 'aa', blast_type) 
     else:
         for seq_type in ['aa','nuc']:#aa first so have info re frame shifts
