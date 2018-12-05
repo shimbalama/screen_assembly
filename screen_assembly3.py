@@ -13,7 +13,7 @@ import numpy as np
 import sys
 import random
 import shutil
-sys.path.append('../common_modules')#Set this specific to you 
+sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you 
 from lab_modules import *
 from Bio.Alphabet import IUPAC
 from Bio.Seq import Seq
