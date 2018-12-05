@@ -649,7 +649,8 @@ def var_pos(args, seq_type, query):
             length = len(seq)
         except:
             print ('alignments need to be same length!')
-            print (len(seq),  len(ref_seq))
+            try:print (len(seq),  len(ref_seq))
+            except:print ('No ref_seq')
         for i, nuc in enumerate(seq):
             i+=1
             if ref_dik.get(str(i))[0] == '-' and nuc == '-':
