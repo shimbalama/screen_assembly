@@ -651,6 +651,7 @@ def var_pos(args, seq_type, query):
             print ('alignments need to be same length!')
             try:print (len(seq),  len(ref_seq))
             except:print ('No ref_seq')
+            continue
         for i, nuc in enumerate(seq):
             i+=1
             if ref_dik.get(str(i))[0] == '-' and nuc == '-':
@@ -699,7 +700,7 @@ def plot_vars(tup):
 
     if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
         number_hits, ref_dik, length = var_pos(args, seq_type, query)	
-        if number_hits != 0:
+        if number_hits != 0 and ref_dik:
             #Get SNP/indel positions in gap free ref seq
             snp_dik = collections.OrderedDict()
             ins_dik = collections.OrderedDict()
