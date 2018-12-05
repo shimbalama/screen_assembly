@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from subprocess import call, Popen
 #from Bio.Blast.Applications import NcbiblastnCommandline
 import argparse
@@ -116,7 +117,8 @@ def main ():
     itol(args, assemblies)
     print ('Making a CSV summary of results...')
     hits_per_query_dik2 = csv(args, assemblies)
-    box(args, assemblies, blast_type)
+    try: box(args, assemblies, blast_type)
+    except Exception as e: print(e, 'cant make box plot')
     if args.aln:
         print ('Making a Box plot')
         hits_per_query_dik = sanity_check(args, blast_type)
@@ -489,7 +491,7 @@ def process_seqs(tup):
     args, blast_type, query = tup
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
-        with open(query + '_seqs_and_ref_' + seq_type + '.fasta','w') as fout:
+        with open(query + '_seqs_and_ref_aa.fasta','w') as fout:
             fout = add_ref(args, query, 'aa', blast_type, fout)
             fout2 = open(query + '_seqs_and_ref_aa_multiple_stops.fasta','w')
             for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
@@ -576,7 +578,7 @@ def itol(args, assemblies):
     #Group by percent similarity
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
     df = pd.DataFrame.from_dict(percent_dict, orient='index')
-    df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
+    #df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
     #Header			
     fout.write('DATASET_HEATMAP\n')
     fout.write('SEPARATOR COMMA\n')
@@ -647,7 +649,8 @@ def var_pos(args, seq_type, query):
             length = len(seq)
         except:
             print ('alignments need to be same length!')
-            print (len(seq),  len(ref_seq))
+            try:print (len(seq),  len(ref_seq))
+            except:print ('No ref_seq')
         for i, nuc in enumerate(seq):
             i+=1
             if ref_dik.get(str(i))[0] == '-' and nuc == '-':
