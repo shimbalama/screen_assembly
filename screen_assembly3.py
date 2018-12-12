@@ -57,11 +57,12 @@ def main ():
     group.add_argument("-k", "--keep_flagged", action='store_true', help="Include hits flagged with Ns, premature stops or contig breaks. Default off.", default=False)
     group.add_argument("-y", "--ignore_warnings", action='store_true', help="Ignore warnings", default=False)
    
-    phy = parser.add_argument_group('Phylogeny', 'Can take a long time')
-    phy.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
-    phy.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
-    phy.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
-    phy.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-SSE3", default='raxmlHPC-PTHREADS-SSE3')
+    phy = parser.add_argument_group('Phylogeny', 'Uses nuc SNP aln. 1k ultrafast bootstraps.')
+    #phy.add_argument("-m", "--raxml_model", type=str, help="Model for raxml. Default is GTRGAMMA", default='GTRGAMMA')
+    #phy.add_argument("-b", "--bootstraps", type=int, help="Number of bootstraps for raxml. Default 100.", default=100)
+    #phy.add_argument("-r", "--raxml", action='store_true', help="Run raxml, requires alignments. Off by default.", default=False)
+    #phy.add_argument("-z", "--raxml_executable", type=str, help="Default is raxmlHPC-PTHREADS-SSE3", default='raxmlHPC-PTHREADS-SSE3')
+    phy.add_argument("-r", "--IQtree", action='store_true', help="Run IQtree, requires nuc alignments. Off by default.", default=False)
 
     box_wisker = parser.add_argument_group('Required', 'Box and wisker plot')
     box_wisker.add_argument("-c", "--label_rotation", type=int, help="Labels on box plot. Default 90.", default=90)
@@ -149,9 +150,9 @@ def main ():
                     tmp = [(args, query, 'aa') for query in query_seqs]
                     pool.map(plot_vars, tmp)   
             var_pos_csv(args, blast_type)
-    if args.raxml:
-        print ('Running RAXML... please be patient!')
-        gene_tree(args, blast_type)
+    if args.IQtree:
+        print ('Running IQtree... please be patient!')
+        gene_tree(args)
     if not args.operon:
         if args.dNdS:
             print ('Calculating dNdS...')
@@ -199,9 +200,10 @@ def versions(args):
         call(['blastn', '-version'], stdout=fout)
         if args.aln:
             call(['muscle', '-version'], stdout=fout)
-        if args.raxml:
-            call([args.raxml_executable, '-v'], stdout=fout)
-
+        #if args.raxml:
+        #    call([args.raxml_executable, '-v'], stdout=fout)
+        if args.IQtree:
+            call(['iqtree', '-version'], stdout=fout)
 
 def pick_top_hit(query, hits_dict, ass, omited):
 
@@ -518,16 +520,50 @@ def process_seqs2(tup):
             else:
                 multi(args, query_seqs, query, seq_type, blast_type)
             
+def count_invariant_sites(args, query):
 
-def gene_tree(args, directory = 'muscle_and_raxml'):
+    d = collections.defaultdict(lambda: collections.defaultdict(int))
+    
+    print ('Counting invar sites...')
+    for record in SeqIO.parse(query + '_nuc_non_redundant.aln','fasta'):
+        for pos, nuc in enumerate(str(record.seq).upper()):
+            d[pos][nuc] += 1
+    d_count = collections.defaultdict(int)
+    for pos in d:
+        if len(d.get(pos)) == 1:
+            d_count[list(d.get(pos).keys())[0]] += 1
+        if 'N' in list(d.get(pos).keys()):
+            d_count['N'] += 1
+        if '-' in list(d.get(pos).keys()):
+            d_count['-'] += 1
+    print (d_count)
+
+    with open(query + '_trimmed_SNP.aln','w') as fout:
+        for record in SeqIO.parse(query + '_nuc_non_redundant.aln','fasta'):
+            seq = ''
+            for pos, nuc in enumerate(str(record.seq).upper()):
+                 if len(d.get(pos)) != 1:
+                     if 'N' not in list(d.get(pos).keys()) and '-' not in list(d.get(pos).keys()):
+                         seq+=nuc
+            fout.write('>'+record.id+'\n')
+            for i in range(0, len(seq), 60):
+                fout.write(seq[i:i+60] + '\n')
+    
+    call_iqtree_with_SNP_aln(args, d_count, query)
+
+def gene_tree(args):
 
     query_seqs = get_query_seqs(args)
     for query in query_seqs:
-        for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
-            pass
-        if i > 1:#make sure it not just ref seq
-            tree(args, query,  '_nuc_non_redundant.aln', args.raxml_executable, args.bootstraps, args.raxml_model)
-
+        try:
+            for i, record in enumerate(SeqIO.parse(query + '_nuc_non_redundant.aln', 'fasta')):
+                pass
+            if i > 1:#make sure it not just ref seq
+                count_invariant_sites(args, query)
+            else:
+                print ('Cant make tree for ', query)
+        except:
+            print ('Cant make tree for ', query)
 
 def variant_types(args, assemblies):
 
@@ -573,12 +609,12 @@ def itol(args, assemblies):
     Makes an itol heatmap template 
     '''
     
-    name = args.query[:-3]+'_itol.txt'.replace('../','')
+    name = args.query.strip().split('/')[-1][:-3]+'_itol.txt'
     fout = open(name,'w')
     #Group by percent similarity
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
     df = pd.DataFrame.from_dict(percent_dict, orient='index')
-    #df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
+    df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
     #Header			
     fout.write('DATASET_HEATMAP\n')
     fout.write('SEPARATOR COMMA\n')
