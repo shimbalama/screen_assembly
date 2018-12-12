@@ -15,7 +15,7 @@ Command line blast
 
 #### Optional
 
-Clustal Omega
+Clustal Omega,
 RAXML and or IQtree
 
 ### Installing
