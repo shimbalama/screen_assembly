@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import screen_assembly.run.analysis as ana
+from subprocess import call, Popen
 
 def main():
     pass
@@ -20,11 +22,11 @@ def blast(args):
     assemblies(contigs)/CDS/proteins
     '''
     print ('testing query seqs')
-    seq_type_query = get_seq_type(args.query)
+    seq_type_query = ana.get_seq_type(args.query)
     print ('fine -> ', seq_type_query)
     print ('testing db seqs')
     cat = args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'
-    seq_type_db = get_seq_type(cat)
+    seq_type_db = ana.get_seq_type(cat)
     print ('fine -> ', seq_type_db)
     #db
     if seq_type_db == 'DNA':

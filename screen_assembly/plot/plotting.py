@@ -7,6 +7,7 @@ import numpy as np
 import sys
 import random
 import matplotlib as mpl 
+import screen_assembly.run.analysis as ana
 
 def main ():
 
@@ -91,7 +92,7 @@ def box(args, assemblies, blast_type):
     '''
     number_of_assemblies = len(assemblies)
     #Get data
-    percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
+    percent_dict, query_seqs = ana.parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
 
     #See how many are left
     labels = {}

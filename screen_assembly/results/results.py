@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+import screen_assembly.run.analysis as ana
+import pandas as pd
+import collections
+import itertools
+
 def main ():
 
     '''
@@ -16,7 +21,7 @@ def itol(args, assemblies):
     name = args.query.strip().split('/')[-1][:-3]+'_itol.txt'
     fout = open(name,'w')
     #Group by percent similarity
-    percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
+    percent_dict, query_seqs = ana.parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'percent')
     df = pd.DataFrame.from_dict(percent_dict, orient='index')
     df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)#sort so most hits and highest homology first
     #Header
@@ -72,8 +77,8 @@ def csv(args, assemblies, binary = True):
     '''
     
     print ('Making csv ...')
-    omit_set, omit_dik = rejects(args)#todo make this work with specific multi hits
-    hits_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'query')
+    omit_set, omit_dik = ana.rejects(args)#todo make this work with specific multi hits
+    hits_dict, query_seqs = ana.parse_blast(args, assemblies, dict_key = 'assembly', dict_value = 'query')
     for csv in ['binary_hits', 'total_hits', 'length_and_sequence_identity']:
         with open(csv + '.csv', 'w') as fout:
             header = 'Names,' + ','.join(query_seqs) +'\n'
@@ -88,7 +93,7 @@ def csv(args, assemblies, binary = True):
                 for query in query_seqs:
                     if query in hits_dict.get(ass, []):
                         if args.keep_flagged:#don't omit flagged
-                            hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass)
+                            hits_per_query = ana.helper(csv, hits_per_query, query, fout, hits_dict, ass)
                         else:#omit flagged, use other hits if there are any
                             number_of_hits = len(hits_dict.get(ass).get(query))
                             if number_of_hits == 1:
@@ -97,7 +102,7 @@ def csv(args, assemblies, binary = True):
                                     fout.write('-'.join(list(itertools.chain.from_iterable(
                                         [omit_dik[ass][query][coord] for coord in omit_dik[ass][query]]))) + ',')
                                 else:
-                                    hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass)
+                                    hits_per_query = ana.helper(csv, hits_per_query, query, fout, hits_dict, ass)
                             else:
                                 not_omited = []
                                 try:
@@ -106,7 +111,7 @@ def csv(args, assemblies, binary = True):
                                         if coords not in omit_set:
                                             not_omited.append(coords)
                                     if not_omited:#use the best one that passed qc
-                                        hits_per_query = helper(csv, hits_per_query, query, fout, hits_dict, ass, omit_set)
+                                        hits_per_query = ana.helper(csv, hits_per_query, query, fout, hits_dict, ass, omit_set)
                                     else:#report all reasons for failing qc
                                         fout.write('-'.join(list(itertools.chain.from_iterable(
                                             [omit_dik[ass][query][coord] for coord in omit_dik[ass][query]]))) + ',')

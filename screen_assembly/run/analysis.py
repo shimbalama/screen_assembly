@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
 
+import collections
+from glob import glob
+from Bio import SeqIO
+import os
+from subprocess import call, Popen
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+import numpy as np
+import sys
+import random
+import matplotlib as mpl 
+
 def main ():
 
     pass
@@ -260,8 +273,8 @@ def make_fasta_non_redundant(args, query, seq_type):
                     fout.write('>'+ str(i + 1) + ' ' + ','.join(redundant_map.get(seq))+'\n')
                 fout.write(seq+'\n')
         fout.close()
-    except:
-        print ('Not making unique seq fasta for',query + '_seqs_and_ref_' + seq_type)
+    except Exception as e:
+        print ('Not making unique seq fasta for',query + '_seqs_and_ref_' + seq_type, e)
 
 def add_ref(args, query, seq_type, blast_type, fout):
 
@@ -274,11 +287,12 @@ def add_ref(args, query, seq_type, blast_type, fout):
         return fout #don't want aa ref with nuc hits
     else:
         record.id = 'ref'
-        if seq_type == 'aa':
+        if seq_type == 'aa' and blast_type != 'tblastn':
             try:
                 record.seq = record.seq.translate(table = 11)
                 SeqIO.write(record,fout,'fasta')
-            except:
+            except Exception as e:
+                print ('Cant add ref!', e, query, seq_type, blast_type)
                 pass #hack to not crash if is aa
         else:
             SeqIO.write(record,fout,'fasta')
@@ -638,5 +652,300 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                     print('itol: skipping hit', hit, 'blast has removed contig information')
     else:
         print ("Can't parse Blast")
-            
+
     return hits_dict, query_seqs
+
+def reg(name, reject_set, reject_dik, query, reason):
+
+    if os.path.exists(name):
+        for record in SeqIO.parse(name,'fasta'):
+            ass = '_'.join(record.id.split('_')[:-1])
+            coords = record.description.replace(record.id,'').strip()
+            exact_hit = record.id+':'+coords
+            reject_dik[ass][query][exact_hit].append(reason)
+            reject_set.add(exact_hit)
+    return reject_set, reject_dik
+
+def rejects(args):
+
+    '''
+    Get info pertiaing to seqs removed due to hitting a contig break or have multiple stops in aa seq
+    '''
+    reject_set = set([])
+    reject_dik = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))#specific to multiple hits
+    query_seqs = get_query_seqs(args)
+    for query in query_seqs:
+        reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
+        reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
+        reject_set, reject_dik = reg(query + '_nuc_seqs_excluded_due_to_contig_break.fasta', reject_set, reject_dik, query, 'Contig')
+        if not args.operon:
+            try: assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+            except: print (query, 'fail check 1: ', query + '_seqs_and_ref_aa_multiple_stops.fasta')
+            reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_multiple_stops.fasta', reject_set, reject_dik, query, 'Stops')
+    
+    return reject_set, reject_dik
+
+def QC_fails(args, query):
+
+    qc = set([])
+    for fasta in [query + '_seqs_and_ref_nuc_Ns.fasta',
+                 query + '_seqs_and_ref_aa_Ns.fasta',
+                 query + '_nuc_seqs_excluded_due_to_contig_break.fasta']:
+        if os.path.exists(fasta):
+            for record in SeqIO.parse(fasta, 'fasta'):
+                coords = record.description.replace(record.id,'').strip()
+                exact_hit = record.id+':'+coords
+                qc.add(exact_hit)
+            
+    if not args.operon:
+        assert os.path.exists(query + '_seqs_and_ref_aa_multiple_stops.fasta') #make sure file has been made before using it!
+        for record in SeqIO.parse(query + '_seqs_and_ref_aa_multiple_stops.fasta', 'fasta'):
+            coords = record.description.replace(record.id,'').strip()
+            exact_hit = record.id+':'+coords
+            qc.add(exact_hit)
+                 
+    return qc
+
+def call_iqtree_with_SNP_aln(args, d_count, query):
+
+    constants=','.join([str(d_count.get('A')), str(d_count.get('C')),
+           str(d_count.get('G')), str(d_count.get('T'))])
+    print ('constants', query, constants)
+    call(['nice', 'iqtree', '-s', query + '_trimmed_SNP.aln', '-nt', str(args.threads),
+          '-m', 'GTR+G', '-bb', '1000', '-czb', '-fconst', constants])
+
+
+def blast(args):
+
+    '''
+    Blasts (Nuc or Prot) seq/s of interest (Query) against db of concatenated
+    assemblies(contigs)/CDS/proteins
+    '''
+    print ('testing query seqs')
+    seq_type_query = get_seq_type(args.query)
+    print ('fine -> ', seq_type_query)
+    print ('testing db seqs')
+    cat = args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'
+    seq_type_db = get_seq_type(cat)
+    print ('fine -> ', seq_type_db)
+    #db
+    if seq_type_db == 'DNA':
+        seq_type = 'nucl'
+    else:
+        seq_type = 'prot'
+    try:
+        print ('makeblastdb')
+        call(['makeblastdb',
+        '-in', cat,
+        '-parse_seqids',
+        '-dbtype', seq_type])#'-parse_seqids',
+        print ('makeblastdb done')
+    except:
+        print ('you need to install makeblastdb or fix paths to it')
+
+    #blast
+    if seq_type_query == 'DNA' and seq_type_db == 'DNA':
+        blast_type = 'blastn'
+        call_blast(args, cat, 'blastn')
+        print ('Running blastn...')
+    elif seq_type_query == 'prot' and seq_type_db == 'prot':
+        blast_type = 'blastp'
+        call_blast(args, cat, 'blastp')
+        print ('Running blastp...')
+    elif seq_type_query == 'prot' and seq_type_db == 'DNA':
+        blast_type = 'tblastn'
+        call_blast(args, cat, 'tblastn')
+        print ('Running tblastn...')
+    else:
+        print ("Error with sequence type, can't run blastn, blastp or tblastx")
+
+    return blast_type
+
+def call_blast(args, db, blast_type = 'blastn'):
+
+    #cant use qcov_hsp_perc with cline (HSP = High- scoring Segment Pair )
+    cmd = [blast_type,
+    '-query', args.query,
+    '-db', db,
+    '-out', 'blast_out.txt',
+    '-outfmt', '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen slen qcovhsp',
+    '-max_target_seqs', '500000',
+    '-qcov_hsp_perc', args.percent_length,
+    '-num_threads', args.threads]
+
+    if blast_type == 'blastn':
+        cmd += ['-perc_identity', args.percent_identity]
+    call(cmd)
+
+def versions(args):
+
+    '''
+    Save wrapped program version to text
+    '''
+
+    with open('versions.txt', 'w') as fout:
+        fout.write(str(args)+'\n')
+        call(['blastn', '-version'], stdout=fout)
+        if args.aln:
+            call(['muscle', '-version'], stdout=fout)
+        #if args.raxml:
+        #    call([args.raxml_executable, '-v'], stdout=fout)
+        if args.IQtree:
+            call(['iqtree', '-version'], stdout=fout)
+
+def clustal(args, query, seq_type):
+
+    if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+        call(['clustalo',
+            '-i', query + '_' + seq_type + '_non_redundant.fasta',
+            '-o', query + '_' + seq_type + '_non_redundant.aln',
+            '--threads', '1'])#seems faster than just giving clustal muli threads
+
+    if args.plots:
+        if seq_type == 'aa':
+            gap_plot(args, query, seq_type)
+
+def plot_vars(tup):
+
+    '''
+    Plots the distribution of vars (SNPs/indels) on the seq and saves as SVG
+    '''
+    args, query, seq_type = tup
+    print ('Plottings vars....')
+
+    if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+        number_hits, ref_dik, length = var_pos(args, seq_type, query)
+        if number_hits != 0 and ref_dik:
+            #Get SNP/indel positions in gap free ref seq
+            snp_dik = collections.OrderedDict()
+            ins_dik = collections.OrderedDict()
+            del_dik = collections.OrderedDict()
+            total = 0
+            gaps = 0 # Want to plot ref seq without '-'s the pos csv has them so will be out of sunc at end
+            for pos in ref_dik:
+                pos_in_seq = int(pos)-gaps
+                nuc, snp, ins, del_count, _ = ref_dik.get(pos)
+                if int(snp) != 0:
+                    total +=1
+                if nuc == '-':#not perfect - colapses ins and overwrites with last count... but how else..?
+                    ins_dik[pos_in_seq] = (float(ins)/float(number_hits))*100
+                    gaps +=1
+                else:
+                    #ins_dik[pos_in_seq] = 0.0
+                    if del_count == 0:
+                        del_dik[pos_in_seq] = 0.0
+                    else:
+                        del_dik[pos_in_seq] = (float(del_count)/float(number_hits))*100
+                    if snp == 0:
+                        snp_dik[pos_in_seq] = 0.0
+                    else:
+                        snp_dik[pos_in_seq] = (float(snp)/float(number_hits))*100
+            #plot
+            plot_vars_func(args, [snp_dik], ['SNPs'], length, total, number_hits, query, seq_type + '_variants')
+            plot_vars_func(args, [ins_dik, del_dik], ['Insertions', 'Deletions'], length, total, number_hits, query,
+                           seq_type + '_indels')
+        else:
+            print ('Skipping ' + query + '_non_redundant.aln')
+
+
+
+def gap_plot(args, query, seq_type):
+
+    '''
+    Line plot of aln to see where gaps are
+    '''
+    d= collections.defaultdict(int)
+    if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
+        if not os.path.exists(query +'_gaps.svg'):
+            for i, record in enumerate(SeqIO.parse(query + '_' + seq_type + '_non_redundant.aln','fasta')):
+                seq_str = str(record.seq)
+                for j, aa in enumerate(seq_str):
+                    if aa != '-':
+                        d[j+1] += 1
+
+            if i > 1:
+                plt.plot(d.values())
+                plt.axis([0, len(d), 0, max(d.values())+1])
+                plt.ylabel('Unique sequences')
+                plt.xlabel('Alignment length including gaps')
+                plt.title('Position of indels in ' + query + ' with ' + str(max(d.values())) + ' sequences')
+                plt.savefig(query +'_gaps.svg')
+                plt.close('all')
+
+
+def box(args, assemblies, blast_type):
+
+    '''
+    Plot variation (box) and carriage (bar) on separate axis, save as svg
+    '''
+    number_of_assemblies = len(assemblies)
+    #Get data
+    percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
+
+    #See how many are left
+    labels = {}
+    df = pd.read_csv('total_hits.csv',index_col=0,dtype='str')
+    if 'Names' in df.columns:
+        df.columns = list(df.columns)[1:] +['na']
+    for query in query_seqs:
+        labels[query] = list(df[query]).count('1')
+        labels[query] += list(df[query]).count('2')
+        labels[query] += list(df[query]).count('3')
+        labels[query] += list(df[query]).count('4')
+        labels[query] += list(df[query]).count('5')#should be enough, will come up below if not
+        if query not in percent_dict:
+            percent_dict[query] = [0.0]
+
+    keys = list(labels.copy().keys())#future proof incase very multi thread it
+    #- https://blog.labix.org/2008/06/27/watch-out-for-listdictkeys-in-python-3
+    number_samples = args.number_samples_on_box_plot
+    for box_number, query_seq_names in enumerate([keys[i:i + number_samples] for i in range(0, len(keys), number_samples)]):
+        variation_box = [[float(no) for no in percent_dict.get(query)] for query in query_seq_names]
+        carriage_bar = []
+        for query in query_seq_names:
+            try:
+                assert labels.get(query) == len(percent_dict.get(query))  #probably not needed but I like to double check
+            except:
+                if labels.get(query) == 0 and percent_dict.get(query) == [0.0]:
+                    pass
+                else:
+                    print('assert fail!!iii', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query))
+            if percent_dict.get(query) == [0.0]:
+                carriage_bar.append(0.0)
+            else:
+                if args.keep_flagged:
+                    labels[query] = len(percent_dict.get(query)) #overwrite above
+                    carriage_bar.append(100.0*(len(percent_dict.get(query))/number_of_assemblies))
+                else:
+                    carriage_bar.append(100.0*(labels.get(query)/number_of_assemblies))
+        #plot
+        plt.figure()
+        fig, ax = plt.subplots()
+        plt.boxplot(variation_box, patch_artist=True)
+        plt.title('Blast screen of ' + str(number_of_assemblies) + ' seqs')
+        ax.set_xticklabels(query_seq_names, rotation=args.label_rotation)#,rotation=45 maybe make this optional
+        plt.ylabel('Percent variation (box & wisker)')
+
+        ax2 = ax.twinx()
+        ax2.bar(ax.get_xticks(),carriage_bar,color='#eeefff',align='center')
+        ax2.set_zorder(1)
+        ax.set_zorder(2)
+        ax2.set_alpha(0.1)
+        ax.patch.set_facecolor('None')
+        rects = ax2.patches
+
+        if args.print_count:
+            seq_counts = [str(labels.get(x)) for x in query_seq_names]
+            for rect, label in zip(rects, seq_counts):
+                height = rect.get_height()
+                ax2.text(rect.get_x() + rect.get_width()/2, height/2, label, ha='center', va='bottom', rotation=90)
+
+        ax2.set_ylim(ax.get_ylim())
+        ax.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
+        ax2.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
+        plt.ylabel('Percent carriage (bar)')
+        plt.tight_layout()
+        plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg", figsize=(22,22))
+
+if __name__ == "__main__":
+    main()

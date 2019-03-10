@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import collections
+import screen_assembly.run.analysis as ana
+
 def main ():
 
     '''
@@ -26,7 +29,7 @@ def rejects(args):
     '''
     reject_set = set([])
     reject_dik = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))#specific to multiple hits
-    query_seqs = get_query_seqs(args)
+    query_seqs = ana.get_query_seqs(args)
     for query in query_seqs:
         reject_set, reject_dik = reg(query + '_seqs_and_ref_nuc_Ns.fasta', reject_set, reject_dik, query, 'Ns')
         reject_set, reject_dik = reg(query + '_seqs_and_ref_aa_Ns.fasta', reject_set, reject_dik, query, 'Ns')
@@ -58,6 +61,7 @@ def QC_fails(args, query):
             qc.add(exact_hit)
                  
     return qc
+
 
 if __name__ == "__main__":
     main()
