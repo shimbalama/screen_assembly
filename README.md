@@ -12,11 +12,13 @@ You need one fasta file with all GOIs as the query and a folder with db contigs/
 
 Python 3 and scypi/Biopython
 Command line blast
+ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 
 #### Optional
 
 Clustal Omega,
-RAXML and or IQtree
+http://www.clustal.org/omega/
+IQtree
 
 ### Installing
 
