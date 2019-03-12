@@ -10,33 +10,25 @@ You need one fasta file with all GOIs as the query and a folder with db contigs/
 
 #### Required
 
-Python 3 and scypi/Biopython
+Python 3
 Command line blast
 ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 
 #### Optional
 
-Clustal Omega,
+Clustal Omega
 http://www.clustal.org/omega/
 IQtree
+http://www.iqtree.org/doc/Quickstart
 
 ### Installing
 
-* Download the screen_assembly3.py script and place it in your PATH: 
-  * git clone https://github.com/shimbalama/screen_assembly.git
-  * Make sure its executable (chmod +x screen_assembly/screen_assembly3.py)
-  * Export PATH="your_path:$PATH" (the command pwd will give you your PATH)
-  * Best to permanently add it to you path by adding it to .bash_profile (mac) or .profile (unix)
-* Download lab_modules.py:
-  * git clone https://github.com/shimbalama/common_modules.git
-  * Make sure its executable (chmod +x common_modules/lab_modules.py)
-  * Export PYTHONPATH="your_path:$PYTHONPATH"
-  * Best to permanently add it to you path by adding it to .bash_profile (mac) or .profile (unix)
-* Place the common_modules folder next to the screen_assembly folder (as thats where it looks by default). OR use a text editor to set this line in screen_assembly3.py to point at the dir you put lab_modules.py in:  sys.path.append('../common_modules') becomes sys.path.append('your_path/common_modules')
+pip3 install --user screen_assembly
+Make sure screen_assembly3.py is in you PATH
 
 ### Check for updates
 
-* git pull
+pip3 install --user screen_assembly
 
 ## Running the tests
 
@@ -48,7 +40,7 @@ Please see the WIKI
 
 ## Authors
 
-* **Liam McIntyre** - *Initial work* - https://github.com/shimbalama/
+* **Liam McIntyre** - https://github.com/shimbalama/
 
 ## License
 
