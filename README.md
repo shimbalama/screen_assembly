@@ -11,14 +11,19 @@ You need one fasta file with all GOIs as the query and a folder with db contigs/
 #### Required
 
 Python 3
+
 Command line blast
+
 ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 
 #### Optional
 
 Clustal Omega
+
 http://www.clustal.org/omega/
+
 IQtree
+
 http://www.iqtree.org/doc/Quickstart
 
 ### Installing
