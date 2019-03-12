@@ -24,7 +24,10 @@ http://www.iqtree.org/doc/Quickstart
 ### Installing
 
 pip3 install --user screen_assembly
+
 Make sure screen_assembly3.py is in you PATH
+
+If tkinter is missing, do 'sudo apt-get install python3-tk' (on Ubuntu)
 
 ### Check for updates
 
