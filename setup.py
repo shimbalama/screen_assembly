@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="screen_assembly",
-    version="1.0.0",
+    version="1.0.1",
     license='MIT',
     author="Liam McIntyre",
     author_email="shimbalama@gmail.com",
@@ -18,8 +18,7 @@ setuptools.setup(
     include_package_data=True,
     zip_safe=False,
     keywords='screen assemblies bacteria gene',
-    install_requires=['pandas'],
-    dependency_links=['https://github.com/Cibiv/IQ-TREE.git'],
+    install_requires=['pandas', 'biopython'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

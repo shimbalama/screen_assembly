@@ -1,3 +1,2 @@
-#include README.rst
-#include assemblies/*fa
-#include antigen_seqs/*fa
+include assemblies/*fa
+include antigen_seqs/*fa
