@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import argparse
 import screen_assembly.results.results as res
 import screen_assembly.run.analysis as ana
@@ -9,36 +10,6 @@ from multiprocessing import Pool, TimeoutError
 import shutil
 import sys
 
-'''
-from subprocess import call, Popen
-#from Bio.Blast.Applications import NcbiblastnCommandline
-import argparse
-from glob import glob
-import os
-import collections
-from Bio import SeqIO
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib
-import numpy as np
-import sys
-import random
-import shutil
-sys.path.append('/home/lmcintyre/code/github/common_modules')#Set this specific to you 
-from lab_modules import *
-from Bio.Alphabet import IUPAC
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
-from Bio.Align import MultipleSeqAlignment
-from Bio.Align.Applications import MuscleCommandline
-from Bio.Alphabet import generic_dna
-from Bio.codonalign.codonseq import cal_dn_ds
-from Bio import codonalign
-import multiprocessing
-from multiprocessing import Pool, TimeoutError
-import matplotlib as mpl 
-import itertools
-'''
 def main ():
 
     '''
@@ -129,7 +100,7 @@ def main ():
             default=False)
 
     box_wisker = parser.add_argument_group(
-            'Required',
+            'box_wisker parameters',
             'Box and wisker plot')
     box_wisker.add_argument(
             "-c",

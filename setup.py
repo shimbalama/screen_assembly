@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="screen_assembly",
-    version="1.0.1",
+    version="1.2.4",
     license='MIT',
     author="Liam McIntyre",
     author_email="shimbalama@gmail.com",
@@ -18,7 +18,7 @@ setuptools.setup(
     include_package_data=True,
     zip_safe=False,
     keywords='screen assemblies bacteria gene',
-    install_requires=['pandas', 'biopython'],
+    install_requires=['pandas', 'biopython', 'matplotlib'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
