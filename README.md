@@ -11,20 +11,28 @@ You need one fasta file with all GOIs as the query and a folder with db contigs/
 #### Required
 
 Python 3
+
 Command line blast
+
 ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 
 #### Optional
 
 Clustal Omega
+
 http://www.clustal.org/omega/
+
 IQtree
+
 http://www.iqtree.org/doc/Quickstart
 
 ### Installing
 
 pip3 install --user screen_assembly
+
 Make sure screen_assembly3.py is in you PATH
+
+If tkinter is missing, do 'sudo apt-get install python3-tk' (on Ubuntu)
 
 ### Check for updates
 
