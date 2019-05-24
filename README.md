@@ -2,6 +2,8 @@
 
 Pipeline that screens for presence of genes of interest (GOI) in bacterial assemblies. Generates multiple CSVs and plots that describe which genes are present and how variable their sequence is. Can use DNA or protein query sequences (GOIs) and DNA contigs/fastas or protein fastas as database (db) to search in. 
 
+If you use this script in scientific publications, then please reference Davies et al., 2019., Nature Genetics., http://dx.doi.org/10.1038/s41588-019-0417-8
+
 ## Getting Started
 
 You need one fasta file with all GOIs as the query and a folder with db contigs/fastas. Db files can only have one '.' in the name (i.e., sample_1.fa NOT sample.1.fa) 
