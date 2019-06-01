@@ -55,9 +55,10 @@ def main ():
     group.add_argument(
             "-x",
             "--plots",
-            action='store_false',
-            help="Make gap and aa variation plots. Some versions of MAC OS are incompatable with these plots and cause crashes. On by default.",
-            default=True)
+            action='store_true',
+            help="Make gap and aa variation plots. Some versions of MAC OS are incompatable with these plots and cause
+            crashes. Off by default.",
+            default=False)
     group.add_argument(
             "-p",
             "--percent_identity",
