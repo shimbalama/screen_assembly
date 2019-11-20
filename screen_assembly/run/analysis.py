@@ -772,10 +772,6 @@ def versions(args):
     with open('versions.txt', 'w') as fout:
         fout.write(str(args)+'\n')
         call(['blastn', '-version'], stdout=fout)
-        if args.aln:
-            call(['muscle', '-version'], stdout=fout)
-        #if args.raxml:
-        #    call([args.raxml_executable, '-v'], stdout=fout)
         if args.IQtree:
             call(['iqtree', '-version'], stdout=fout)
 

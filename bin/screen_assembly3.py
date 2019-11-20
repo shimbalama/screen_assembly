@@ -203,7 +203,7 @@ def main ():
             if args.operon:
                 with Pool(processes=int(args.threads)) as pool:
                     tmp = [(args, query, 'nuc') for query in query_seqs]
-                    pool.map(iplot.plot_vars, tmp)
+                    pool.map(plot.plot_vars, tmp)
             else:
                 variant_types(args, assemblies) 
                 with Pool(processes=int(args.threads)) as pool:
