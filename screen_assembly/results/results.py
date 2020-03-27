@@ -29,7 +29,7 @@ def itol(args, assemblies):
     fout.write('SEPARATOR COMMA\n')
     fout.write('DATASET_LABEL,' + args.query[:-3] + '\n')
     fout.write('COLOR,#ff0000\n')
-    FIELD_LABELS = ','.join(query_seqs)
+    FIELD_LABELS = ','.join(list(df.columns))
     fout.write('FIELD_LABELS,' + FIELD_LABELS + '\n')
     '''
     fout.write('LEGEND_TITLE,Dataset_legend')

@@ -56,8 +56,7 @@ def main ():
             "-x",
             "--plots",
             action='store_true',
-            help="Make gap and aa variation plots. Some versions of MAC OS are incompatable with these plots and cause
-            crashes. Off by default.",
+            help="Make gap and aa variation plots. Some versions of MAC OS are incompatable with these plots and cause crashes. Off by default.",
             default=False)
     group.add_argument(
             "-p",
