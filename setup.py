@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="screen_assembly",
-    version="1.2.7",
+    version="1.2.8",
     license='MIT',
     author="Liam McIntyre",
     author_email="shimbalama@gmail.com",

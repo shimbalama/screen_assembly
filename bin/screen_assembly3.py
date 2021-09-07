@@ -128,10 +128,8 @@ def main ():
             default = 10)
   
     args = parser.parse_args()
-    print ('args',args)	
     if args.style:
         mpl.style.use('classic')
-        
         
     #run
 
@@ -202,16 +200,35 @@ def main ():
             if args.operon:
                 with Pool(processes=int(args.threads)) as pool:
                     tmp = [(args, query, 'nuc') for query in query_seqs]
-                    pool.map(plot.plot_vars, tmp)
+                    pool.map(ana.plot_vars, tmp)
             else:
-                variant_types(args, assemblies) 
+                ana.variant_types(args, assemblies) 
                 with Pool(processes=int(args.threads)) as pool:
                     tmp = [(args, query, 'aa') for query in query_seqs]
-                    pool.map(plot.plot_vars, tmp)   
-            var_pos_csv(args, ana.blast_type)
+                    pool.map(ana.plot_vars, tmp)   
+            #ana.var_pos_csv(args, ana.blast_type)
     if args.IQtree:
         print ('Running IQtree... please be patient!')
         ana.gene_tree(args)
+    #rename
+    with open('names_map.csv', 'r') as fin:
+        name_map_dict = dict(x.strip().split(',') for x in fin.readlines())
+    for any_file in glob('*'):
+        if 'names_map' not in any_file:
+            for i in reversed(range(0,111111)): #do big first so s1 doesn't replace s11 etc
+                tig_ID = 'sample_' +str(i)
+                ass_file_name = name_map_dict.get(tig_ID)
+                if ass_file_name:
+                    fin = open(any_file, "rt")
+                    data = fin.read()
+                    if tig_ID + '_' in data:
+                        data = data.replace(tig_ID + '_', ass_file_name + '_')
+                    else:
+                        data = data.replace(tig_ID, ass_file_name)
+                    fin.close()
+                    fin = open(any_file, "wt")
+                    fin.write(data)
+                    fin.close()
     #Tidy
     for query in ana.get_query_seqs(args):
         if not os.path.exists(query):

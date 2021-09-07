@@ -51,35 +51,42 @@ def cat(args):
     Concatenates assemblies; takes n assemblies and makes one file with all contigs
     '''
     print ('cating assemblies...')
-    if os.path.isfile(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'):
-        make = False
-    else:
-        if not os.path.exists(args.input_folder + '/concatenated_assemblies'):
-            os.makedirs(args.input_folder + '/concatenated_assemblies')
-        make = True
-        fout = open(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta', 'w')
+    # if os.path.isfile(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'):
+    #     make = False
+    # else:
+    if not os.path.exists(args.input_folder + '/concatenated_assemblies'):
+        os.makedirs(args.input_folder + '/concatenated_assemblies')
+    make = True
+    fout = open(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta', 'w')
     assemblies = set([])
     if make:
-        for assembly in glob(args.input_folder + '/*'):
-            ass_file_name = assembly.strip().split('/')[-1].split('.')
-            if ass_file_name == ['concatenated_assemblies']:
-                continue
-            try:
-                assert len(ass_file_name) == 2
-            except:
-                print ('Please ensure that your database file name only has one fullstop i.e., sample_1.fa NOT sample.1.fa')
-                sys.exit(0)
-            ass_file_name = ass_file_name[0].replace('#','_')#Hashes break stuff
-            assemblies.add(ass_file_name)
-            for i, record in enumerate(SeqIO.parse(assembly, 'fasta')):
-                record.id = 'gnl|MYDB|'+ass_file_name + '_' + str(i)#can't handle all the variablity any other way
-                SeqIO.write(record,fout,'fasta')
+        with open('names_map.csv', 'w') as fout_map:
+            for j, assembly in enumerate(glob(args.input_folder + '/*')):
+                ass_file_name = assembly.strip().split('/')[-1].split('.')
+                if ass_file_name == ['concatenated_assemblies']:
+                    continue
+                try:
+                    assert len(ass_file_name) == 2
+                except:
+                    print ('Please ensure that your database file name only has one fullstop i.e., sample_1.fa NOT sample.1.fa')
+                    sys.exit(0)
+                ass_file_name = ass_file_name[0].replace('#','_')#Hashes break stuff
+                #assemblies.add(ass_file_name)
+                tig_ID = f'sample_{str(j)}'
+                assemblies.add(tig_ID)
+                fout_map.write(','.join([tig_ID, ass_file_name]) +'\n')
+                for i, record in enumerate(SeqIO.parse(assembly, 'fasta')):
+                    record.description += ' ' + ass_file_name
+                    record.id = f'gnl|MYDB|sample_{str(j)}_{str(i)}'#can't handle all the variablity any other way
+                    SeqIO.write(record, fout, 'fasta')
     if make:
         fout.close()
     #If pre cated
     print ('Getting assembly names...')
     with open('assembly_names.txt','w') as fout:
         for record in SeqIO.parse(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta', 'fasta'):
+            #ass = record.id.split('|')[-1].split('_contig')[0]
+            #ass = record.description.split(' ')[-1]
             ass = '_'.join(record.id.split('_')[:-1]).replace('gnl|MYDB|','')#just takes contig number off the end
             if make:
                 assert ass in assemblies
@@ -260,7 +267,7 @@ def make_fasta_non_redundant(args, query, seq_type):
                 fout.write(seq+'\n')
         fout.close()
     except Exception as e:
-        print ('Not making unique seq fasta for',query + '_seqs_and_ref_' + seq_type, e)
+        print ('Not making unique seq fasta for',query + '_seqs_and_ref_' + seq_type, 'because there are no hits for this query')
 
 def add_ref(args, query, seq_type, blast_type, fout):
 
@@ -519,7 +526,7 @@ def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_
     df = pd.DataFrame(list_of_diks, index=list_of_dik_names)
     df_bar = df.transpose()
     n = 100 #ticks
-    ax = df_bar.plot.bar(figsize=(15,8), edgecolor = "none", width = 1, stacked=True)
+    ax = df_bar.plot.bar(edgecolor = "none", width = 1, stacked=True)
     ticks = ax.xaxis.get_ticklocs()
     ticklabels = [l.get_text() for l in ax.xaxis.get_ticklabels()]
     yticks = [i for i in range(101)]
@@ -629,6 +636,7 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                         continue
                 if not 'pdb' in hit:#wtf is this pdb?
                     if percent >= percent_identity:
+                        #ass = '_'.join(hit.split('_')[:-2])
                         ass = '_'.join(hit.split('_')[:-1])
                         try: assert ass in assemblies
                         except: print (ass, 'not in assemblies', assemblies)
@@ -720,11 +728,13 @@ def blast(args):
     else:
         seq_type = 'prot'
     try:
-        print ('makeblastdb')
-        call(['makeblastdb',
+        command = ['makeblastdb',
         '-in', cat,
         '-parse_seqids',
-        '-dbtype', seq_type])#'-parse_seqids',
+        '-dbtype', seq_type]
+        
+        print ('makeblastdb', ' '.join(command))
+        call(command)#'-parse_seqids',
         print ('makeblastdb done')
     except:
         print ('you need to install makeblastdb or fix paths to it')
@@ -761,6 +771,7 @@ def call_blast(args, db, blast_type = 'blastn'):
 
     if blast_type == 'blastn':
         cmd += ['-perc_identity', args.percent_identity]
+    print(' '.join(cmd))
     call(cmd)
 
 def versions(args):
@@ -774,6 +785,8 @@ def versions(args):
         call(['blastn', '-version'], stdout=fout)
         if args.IQtree:
             call(['iqtree', '-version'], stdout=fout)
+            
+    #todo - add tot his the command that run run - ie, write out args
 
 def clustal(args, query, seq_type):
 
@@ -863,20 +876,19 @@ def box(args, assemblies, blast_type):
     number_of_assemblies = len(assemblies)
     #Get data
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
-
+    print('percent_dict', percent_dict)
     #See how many are left
-    labels = {}
+    labels = collections.defaultdict(int)
     df = pd.read_csv('total_hits.csv',index_col=0,dtype='str')
     if 'Names' in df.columns:
         df.columns = list(df.columns)[1:] +['na']
-    for query in query_seqs:
-        labels[query] = list(df[query]).count('1')
-        labels[query] += list(df[query]).count('2')
-        labels[query] += list(df[query]).count('3')
-        labels[query] += list(df[query]).count('4')
-        labels[query] += list(df[query]).count('5')#should be enough, will come up below if not
-        if query not in percent_dict:
-            percent_dict[query] = [0.0]
+    
+    for i in range(111):#should be enough, will come up below if not
+        for query in query_seqs:
+            labels[query] += list(df[query]).count(str(i+1))
+            if query not in percent_dict:
+                percent_dict[query] = [0.0]
+                
 
     keys = list(labels.copy().keys())#future proof incase very multi thread it
     #- https://blog.labix.org/2008/06/27/watch-out-for-listdictkeys-in-python-3
@@ -891,7 +903,7 @@ def box(args, assemblies, blast_type):
                 if labels.get(query) == 0 and percent_dict.get(query) == [0.0]:
                     pass
                 else:
-                    print('assert fail!!iii', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query))
+                    print('assert fail!!iii', query, labels.get(query), len(percent_dict.get(query)), percent_dict.get(query), labels)
             if percent_dict.get(query) == [0.0]:
                 carriage_bar.append(0.0)
             else:
@@ -927,7 +939,7 @@ def box(args, assemblies, blast_type):
         ax2.set_yticks([0.0,20.0,40.0,60.,80.0,100.0])
         plt.ylabel('Percent carriage (bar)')
         plt.tight_layout()
-        plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg", figsize=(22,22))
+        plt.savefig("box_and_carriage_plot" + str(box_number + 1) + ".svg")
 
 if __name__ == "__main__":
     main()
