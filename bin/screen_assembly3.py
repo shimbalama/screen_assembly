@@ -9,6 +9,7 @@ from glob import glob
 from multiprocessing import Pool, TimeoutError
 import shutil
 import sys
+from screen_assembly import __version__
 
 def main ():
 
@@ -22,7 +23,11 @@ def main ():
     #Args
     parser = argparse.ArgumentParser(
             description='Screens assemblies for given gene/genes/proteins/operons.')
-    
+    parser.add_argument(
+            '--version',
+            action='version',
+            version=__version__)
+
     required = parser.add_argument_group(
             'Required',
             'Need query fastas and a database to look in')
