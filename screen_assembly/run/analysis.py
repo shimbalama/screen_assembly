@@ -4,14 +4,10 @@ import collections
 from glob import glob
 from Bio import SeqIO
 import os
-from subprocess import call, Popen
+from subprocess import call
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib
-import numpy as np
 import sys
-import random
-import matplotlib as mpl 
 import shutil
 
 def main ():
@@ -51,9 +47,7 @@ def cat(args):
     Concatenates assemblies; takes n assemblies and makes one file with all contigs
     '''
     print ('cating assemblies...')
-    # if os.path.isfile(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'):
-    #     make = False
-    # else:
+ 
     if not os.path.exists(args.input_folder + '/concatenated_assemblies'):
         os.makedirs(args.input_folder + '/concatenated_assemblies')
     make = True
@@ -85,8 +79,6 @@ def cat(args):
     print ('Getting assembly names...')
     with open('assembly_names.txt','w') as fout:
         for record in SeqIO.parse(args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta', 'fasta'):
-            #ass = record.id.split('|')[-1].split('_contig')[0]
-            #ass = record.description.split(' ')[-1]
             ass = '_'.join(record.id.split('_')[:-1]).replace('gnl|MYDB|','')#just takes contig number off the end
             if make:
                 assert ass in assemblies
@@ -147,7 +139,7 @@ def get_query_seqs(args):
     return query_seqs
 
 
-def boil_down(args):
+def boil_down():
 
     '''
     just report hits
@@ -191,12 +183,12 @@ def helper(csv, hits_per_query, query, fout, hits_dict, ass, omited = set([])):
     if csv == 'total_hits':
         fout.write(str(len(hits_dict.get(ass).get(query)))+',')
     if csv == 'length_and_sequence_identity':
-        length, percent, coords = pick_top_hit(query, hits_dict, ass, omited) 
+        length, percent, _ = pick_top_hit(query, hits_dict, ass, omited) 
         fout.write('percent_length='+str(length)+' percent_identity='+str(percent)+',')
 
     return hits_per_query
 
-def boot_functionality(args, fout, fout2,  contig, query, seqs, record_hit):
+def boot_functionality(fout, fout2,  contig, query, seqs, record_hit):
 
     last_pos = len(query) + contig.index(query)
 
@@ -230,21 +222,20 @@ def boot_hits_at_contig_breaks(tup):
                         if seq_id in seqs:
                             for hit in seqs.get(seq_id):
                                 coords = hit.description.replace(record.id,'').strip()
-                                exact_hit = hit.id+':'+coords
                                 found = False
                                 tmp = str(hit.seq).upper()
                                 contig = str(record.seq).upper()#contig
                                 if tmp in contig:
-                                    boot_functionality(args, fout, fout2,  contig, tmp, seqs, hit)
+                                    boot_functionality(fout, fout2,  contig, tmp, seqs, hit)
                                     found = True
                                 else:
                                     tmp = str(hit.seq.reverse_complement()).upper()
-                                    boot_functionality(args, fout, fout2, contig, tmp, seqs, hit)
+                                    boot_functionality(fout, fout2, contig, tmp, seqs, hit)
                                     found = True
                                 assert found
 
 
-def make_fasta_non_redundant(args, query, seq_type):
+def make_fasta_non_redundant(query, seq_type):
 
     '''
     Boil each multi fasta down to unique seqs for every query - at aa level
@@ -305,7 +296,7 @@ def flag_stops(args, fout, fout2, record):
 
     return fout, fout2
 
-def translated(args, query_seqs, query, seq_type, blast_type):
+def translated(args, query, seq_type, blast_type):
 
     '''
     Handles seq conversion if needed, excludes rubbish from further analysis
@@ -329,10 +320,10 @@ def translated(args, query_seqs, query, seq_type, blast_type):
         if seq_type == 'aa':
             fout2.close()
 
-def multi(args, query_seqs, query, seq_type, blast_type):
+def multi(args, query, seq_type):
 
     catch_multiple_hits = collections.defaultdict(lambda:collections.defaultdict(str))
-    hits_dict, query_seqs = parse_blast(args, dict_key = 'assembly', dict_value = 'query')
+    hits_dict, _ = parse_blast(args, dict_key = 'assembly', dict_value = 'query')
     qc = QC_fails(args, query)
     for record in SeqIO.parse(query + '_seqs_and_ref_' + seq_type + '.fasta', 'fasta'):
         coords = record.description.replace(record.id,'').strip()
@@ -348,10 +339,10 @@ def multi(args, query_seqs, query, seq_type, blast_type):
             if ass == 'ref':
                 record = catch_multiple_hits['ref']['na']
             else:
-                length, percent, coords = pick_top_hit(query, hits_dict, ass, qc)
+                _, _, coords = pick_top_hit(query, hits_dict, ass, qc)
                 record = catch_multiple_hits[ass][coords]
             SeqIO.write(record, fout,'fasta')
-    make_fasta_non_redundant(args, query, seq_type)
+    make_fasta_non_redundant(query, seq_type)
     if args.aln:
         clustal(args, query, seq_type)
 
@@ -371,26 +362,25 @@ def process_seqs(tup):
             for record in SeqIO.parse(query + '_seqs_without_contig_break.fasta','fasta'):
                 fout, fout2 = flag_stops(args, fout, fout2, record)
             fout2.close()
-        #multi(args, query_seqs, query, 'aa', blast_type)
     else:
         for seq_type in ['aa','nuc']:#aa first so have info re frame shifts
             if args.operon and seq_type =='aa':
                 continue
             else:
-                translated(args, query_seqs, query, seq_type, blast_type)
+                translated(args, query, seq_type, blast_type)
 
 def process_seqs2(tup):
 
     args, blast_type, query = tup
     query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
-        multi(args, query_seqs, query, 'aa', blast_type)
+        multi(args, query, 'aa')
     else:
         for seq_type in ['aa','nuc']:
             if args.operon and seq_type =='aa':
                 continue
             else:
-                multi(args, query_seqs, query, seq_type, blast_type)
+                multi(args, query, seq_type)
 
 def count_invariant_sites(args, query):
 
@@ -408,7 +398,6 @@ def count_invariant_sites(args, query):
             d_count['N'] += 1
         if '-' in list(d.get(pos).keys()):
             d_count['-'] += 1
-    print (d_count)
 
     with open(query + '_trimmed_SNP.aln','w') as fout:
         for record in SeqIO.parse(query + '_nuc_non_redundant.aln','fasta'):
@@ -473,7 +462,7 @@ def variant_types(args, assemblies):
         fout.write(tw+'\n')
     fout.close()
 
-def var_pos(args, seq_type, query):
+def var_pos(seq_type, query):
 
     '''
     Get positions of vars in aa or nuc seqs
@@ -517,7 +506,7 @@ def var_pos(args, seq_type, query):
     
     return number_hits, ref_dik, length
 
-def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_hits, query, seq_types):
+def plot_vars_func(list_of_diks, list_of_dik_names, length, total, number_hits, query, seq_types):
 
     '''
     PLot vars v ref seq
@@ -538,7 +527,7 @@ def plot_vars_func(args, list_of_diks, list_of_dik_names, length, total, number_
     plt.ylabel('Number of samples with ' + seq_types + ' %')
     plt.savefig(query+'_'+seq_types+'.svg')
 
-def sanity_check(args, blast_type):
+def sanity_check(args):
 
     '''
     Make sure everything lines up
@@ -636,7 +625,6 @@ def parse_blast(args, assemblies = 'na', dict_key = 'assembly', dict_value = 'pe
                         continue
                 if not 'pdb' in hit:#wtf is this pdb?
                     if percent >= percent_identity:
-                        #ass = '_'.join(hit.split('_')[:-2])
                         ass = '_'.join(hit.split('_')[:-1])
                         try: assert ass in assemblies
                         except: print (ass, 'not in assemblies', assemblies)
@@ -704,7 +692,6 @@ def call_iqtree_with_SNP_aln(args, d_count, query):
 
     constants=','.join([str(d_count.get('A')), str(d_count.get('C')),
            str(d_count.get('G')), str(d_count.get('T'))])
-    print ('constants', query, constants)
     call(['nice', 'iqtree', '-s', query + '_trimmed_SNP.aln', '-nt', str(args.threads),
           '-m', 'GTR+G', '-bb', '1000', '-czb', '-fconst', constants])
 
@@ -771,7 +758,6 @@ def call_blast(args, db, blast_type = 'blastn'):
 
     if blast_type == 'blastn':
         cmd += ['-perc_identity', args.percent_identity]
-    print(' '.join(cmd))
     call(cmd)
 
 def versions(args):
@@ -798,7 +784,7 @@ def clustal(args, query, seq_type):
 
     if args.plots:
         if seq_type == 'aa':
-            gap_plot(args, query, seq_type)
+            gap_plot(query, seq_type)
 
 def plot_vars(tup):
 
@@ -809,7 +795,7 @@ def plot_vars(tup):
     print ('Plottings vars....')
 
     if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
-        number_hits, ref_dik, length = var_pos(args, seq_type, query)
+        number_hits, ref_dik, length = var_pos(seq_type, query)
         if number_hits != 0 and ref_dik:
             #Get SNP/indel positions in gap free ref seq
             snp_dik = collections.OrderedDict()
@@ -836,15 +822,15 @@ def plot_vars(tup):
                     else:
                         snp_dik[pos_in_seq] = (float(snp)/float(number_hits))*100
             #plot
-            plot_vars_func(args, [snp_dik], ['SNPs'], length, total, number_hits, query, seq_type + '_variants')
-            plot_vars_func(args, [ins_dik, del_dik], ['Insertions', 'Deletions'], length, total, number_hits, query,
+            plot_vars_func([snp_dik], ['SNPs'], length, total, number_hits, query, seq_type + '_variants')
+            plot_vars_func([ins_dik, del_dik], ['Insertions', 'Deletions'], length, total, number_hits, query,
                            seq_type + '_indels')
         else:
             print ('Skipping ' + query + '_non_redundant.aln')
 
 
 
-def gap_plot(args, query, seq_type):
+def gap_plot(query, seq_type):
 
     '''
     Line plot of aln to see where gaps are
@@ -868,7 +854,7 @@ def gap_plot(args, query, seq_type):
                 plt.close('all')
 
 
-def box(args, assemblies, blast_type):
+def box(args, assemblies):
 
     '''
     Plot variation (box) and carriage (bar) on separate axis, save as svg
@@ -876,7 +862,6 @@ def box(args, assemblies, blast_type):
     number_of_assemblies = len(assemblies)
     #Get data
     percent_dict, query_seqs = parse_blast(args, assemblies, dict_key = 'query', dict_value = 'percent')
-    print('percent_dict', percent_dict)
     #See how many are left
     labels = collections.defaultdict(int)
     df = pd.read_csv('total_hits.csv',index_col=0,dtype='str')

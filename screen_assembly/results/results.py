@@ -4,6 +4,7 @@ import screen_assembly.run.analysis as ana
 import pandas as pd
 import collections
 import itertools
+import os
 
 def main ():
 
@@ -51,14 +52,14 @@ def var_pos_csv(args, blast_type):
     '''
     Csv of var pos for aa and nuc alns
     '''
-    query_seqs = get_query_seqs(args)
+    query_seqs = ana.get_query_seqs(args)
     for query in query_seqs:
         for seq_type in ['nuc', 'aa']:
             if blast_type == 'tblastn' and seq_type == 'nuc':
                 continue#no ref
             if not os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
                 continue # skip nuc if using aa and or any seqs without hits
-            number_hits, ref_dik, length = var_pos(args, seq_type, query)
+            _, ref_dik, _ = ana.var_pos(seq_type, query)
             fout = open(query + '_' + seq_type + '_pos.csv','w')#checked
             for pos in ref_dik:
                 fout.write(ref_dik.get(pos)[0] +',')
