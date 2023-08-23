@@ -89,12 +89,12 @@ def cat(args):
 
     return assemblies
 
-def fasta(tup):
+def fasta(args, query):
 
     '''
     Makes a fasta file of all hits for each query
     '''
-    args, query = tup
+    
     #make oonfig file from blast output
     current = query + '_config.txt'
     fout = open(current,'w')
@@ -188,7 +188,7 @@ def helper(csv, hits_per_query, query, fout, hits_dict, ass, omited = set([])):
 
     return hits_per_query
 
-def boot_functionality(fout, fout2,  contig, query, seqs, record_hit):
+def boot_functionality(fout, fout2,  contig, query, record_hit):
 
     last_pos = len(query) + contig.index(query)
 
@@ -200,12 +200,13 @@ def boot_functionality(fout, fout2,  contig, query, seqs, record_hit):
         SeqIO.write(record_hit, fout,'fasta')
 
 
-def boot_hits_at_contig_breaks(tup):
+
+
+def boot_hits_at_contig_breaks(args, query):
 
     '''
     Identifies and removes hits that touch a contig break
     '''
-    args, query = tup
     cat = args.input_folder + '/concatenated_assemblies/concatenated_assemblies.fasta'
     seq_type_db = get_seq_type(cat)
     if seq_type_db == 'prot' or args.keep_flagged:
@@ -221,18 +222,13 @@ def boot_hits_at_contig_breaks(tup):
                         seq_id = str(record.id).replace('gnl|MYDB|','')
                         if seq_id in seqs:
                             for hit in seqs.get(seq_id):
-                                coords = hit.description.replace(record.id,'').strip()
-                                found = False
                                 tmp = str(hit.seq).upper()
                                 contig = str(record.seq).upper()#contig
                                 if tmp in contig:
-                                    boot_functionality(fout, fout2,  contig, tmp, seqs, hit)
-                                    found = True
+                                    boot_functionality(fout, fout2,  contig, tmp, hit)
                                 else:
                                     tmp = str(hit.seq.reverse_complement()).upper()
-                                    boot_functionality(fout, fout2, contig, tmp, seqs, hit)
-                                    found = True
-                                assert found
+                                    boot_functionality(fout, fout2, contig, tmp, hit)
 
 
 def make_fasta_non_redundant(query, seq_type):
@@ -347,14 +343,12 @@ def multi(args, query, seq_type):
         clustal(args, query, seq_type)
 
 
-def process_seqs(tup):
+def process_seqs(args, blast_type, query):
 
     '''
     Aligns fastas with ClustalO. Translates seqs. Removes redundancy.
     '''
 
-    args, blast_type, query = tup
-    query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
         with open(query + '_seqs_and_ref_aa.fasta','w') as fout:
             fout = add_ref(args, query, 'aa', blast_type, fout)
@@ -370,9 +364,7 @@ def process_seqs(tup):
                 translated(args, query, seq_type, blast_type)
 
 def process_seqs2(tup):
-
     args, blast_type, query = tup
-    query_seqs = get_query_seqs(args)
     if blast_type == 'blastp':#no nuc output if prot query used
         multi(args, query, 'aa')
     else:
@@ -791,8 +783,7 @@ def plot_vars(tup):
     '''
     Plots the distribution of vars (SNPs/indels) on the seq and saves as SVG
     '''
-    args, query, seq_type = tup
-    print ('Plottings vars....')
+    query, seq_type = tup
 
     if os.path.exists(query + '_' + seq_type + '_non_redundant.aln'):
         number_hits, ref_dik, length = var_pos(seq_type, query)

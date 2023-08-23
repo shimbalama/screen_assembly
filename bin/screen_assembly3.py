@@ -10,6 +10,7 @@ from multiprocessing import Pool
 import shutil
 import sys
 from screen_assembly import __version__
+from functools import partial
 
 def main ():
 
@@ -155,25 +156,15 @@ def main ():
     except: print ('issue with assembly name', list(sorted(assemblies)))
     print ('Starting Blast...')
     blast_type = ana.blast(args)
-    print ('Snipping sequences from db...')
-        #Get fastas
-    with Pool(processes=int(args.threads)) as pool:
-        tmp = [(args, query) for query in query_seqs]
-        pool.map(ana.fasta, tmp)
-    print ('Looking for hits at contig breaks...')
+    
     with Pool(processes=int(args.threads)*2) as pool:
-        tmp = [(args, query) for query in query_seqs]
-        pool.map(ana.boot_hits_at_contig_breaks, tmp)
-        #Process seqs
-    print ('Processing seqs (running QC (if enabled)) and translating (if required)...')
+        tmp = [(args, blast_type, query) for query in query_seqs]
+        for _ in pool.imap_unordered(pool_tasks, tmp, chunksize=3):
+            pass
     with Pool(processes=int(args.threads)) as pool:
         tmp = [(args, blast_type, query) for query in query_seqs]
-        pool.map(ana.process_seqs, tmp)
-    
-    with Pool(processes=int(args.threads)) as pool:
-        tmp = [(args, blast_type, query) for query in query_seqs]
-        pool.map(ana.process_seqs2, tmp)     
-    
+        for _ in pool.imap_unordered(ana.process_seqs2, tmp):
+            pass
     print ('Making an itol template...')
     res.itol(args, assemblies)
     print ('Making a CSV summary of results...')
@@ -204,12 +195,12 @@ def main ():
             print ('Plotting...')
             if args.operon:
                 with Pool(processes=int(args.threads)) as pool:
-                    tmp = [(args, query, 'nuc') for query in query_seqs]
+                    tmp = [(query, 'nuc') for query in query_seqs]
                     pool.map(ana.plot_vars, tmp)
             else:
                 ana.variant_types(args, assemblies) 
                 with Pool(processes=int(args.threads)) as pool:
-                    tmp = [(args, query, 'aa') for query in query_seqs]
+                    tmp = [(query, 'aa') for query in query_seqs]
                     pool.map(ana.plot_vars, tmp)   
     if args.IQtree:
         print ('Running IQtree... please be patient!')
@@ -255,6 +246,14 @@ def rename(tmp):
                 fin = open(any_file, "wt")
                 fin.write(data)
                 fin.close()
+
+def pool_tasks(tup):
+    args, blast_type, query = tup
+
+    ana.fasta(args, query)
+    ana.boot_hits_at_contig_breaks(args, query)
+    ana.process_seqs(args, blast_type, query)
+    #process_seqs2(args, blast_type, query)
 
 if __name__ == "__main__":
     main()
